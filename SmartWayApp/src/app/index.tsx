@@ -19,8 +19,10 @@ import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 
-// Automatically detect host IP from Expo Go connection with fallback
-const getBackendHost = () => {
+const RENDER_CLOUD_HOST = 'smartway-backend-ir79.onrender.com';
+
+// Detect local host IP from Expo Go connection if needed
+const getLocalBackendHost = () => {
   const hostUri = Constants.expoConfig?.hostUri || Constants.manifest2?.extra?.expoGo?.debuggerHost;
   if (hostUri) {
     return hostUri.split(':')[0];
@@ -28,7 +30,8 @@ const getBackendHost = () => {
   return '192.168.1.12';
 };
 
-const DEFAULT_HOST = getBackendHost();
+// Default to 24/7 Render Cloud backend for real-world driving across Hyderabad
+const DEFAULT_HOST = RENDER_CLOUD_HOST;
 
 // Helper: Haversine distance in kilometers
 function calculateHaversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -193,20 +196,28 @@ export default function HomeScreen() {
   const [hostInput, setHostInput] = useState<string>(DEFAULT_HOST);
 
   const API_URL = useMemo(() => {
-    if (backendHost.startsWith('http://') || backendHost.startsWith('https://')) {
-      return backendHost.replace(/\/+$/, '');
+    const clean = backendHost.trim();
+    if (clean.startsWith('http://') || clean.startsWith('https://')) {
+      return clean.replace(/\/+$/, '');
     }
-    return `http://${backendHost}:8000`;
+    if (clean.includes('onrender.com') || clean.includes('.com') || clean.includes('.app') || clean.includes('.org') || clean.includes('.dev')) {
+      return `https://${clean.replace(/\/+$/, '')}`;
+    }
+    return `http://${clean}:8000`;
   }, [backendHost]);
 
   const WS_URL = useMemo(() => {
-    if (backendHost.startsWith('https://')) {
-      return `wss://${backendHost.replace('https://', '').replace(/\/+$/, '')}/ws`;
+    const clean = backendHost.trim();
+    if (clean.startsWith('https://')) {
+      return `wss://${clean.replace('https://', '').replace(/\/+$/, '')}/ws`;
     }
-    if (backendHost.startsWith('http://')) {
-      return `ws://${backendHost.replace('http://', '').replace(/\/+$/, '')}/ws`;
+    if (clean.startsWith('http://')) {
+      return `ws://${clean.replace('http://', '').replace(/\/+$/, '')}/ws`;
     }
-    return `ws://${backendHost}:8000/ws`;
+    if (clean.includes('onrender.com') || clean.includes('.com') || clean.includes('.app') || clean.includes('.org') || clean.includes('.dev')) {
+      return `wss://${clean.replace(/\/+$/, '')}/ws`;
+    }
+    return `ws://${clean}:8000/ws`;
   }, [backendHost]);
 
   // Operational Mode: Real Driver (Live GPS on iOS in Hyderabad) vs. Simulation (SUMO)
@@ -1900,11 +1911,47 @@ export default function HomeScreen() {
               When driving on mobile cellular data (4G/5G) in Hyderabad, enter your Ngrok tunnel URL or your local network IP:
             </Text>
 
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 8 }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: hostInput.includes('onrender.com') ? '#065F46' : '#1E293B',
+                  borderColor: hostInput.includes('onrender.com') ? '#10B981' : '#334155',
+                  borderWidth: 1,
+                  borderRadius: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 8,
+                  alignItems: 'center',
+                }}
+                onPress={() => setHostInput(RENDER_CLOUD_HOST)}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>☁️ Render Cloud</Text>
+                <Text style={{ color: '#6EE7B7', fontSize: 9, marginTop: 2 }}>24/7 4G/5G Driving</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: !hostInput.includes('onrender.com') ? '#1E3A8A' : '#1E293B',
+                  borderColor: !hostInput.includes('onrender.com') ? '#3B82F6' : '#334155',
+                  borderWidth: 1,
+                  borderRadius: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 8,
+                  alignItems: 'center',
+                }}
+                onPress={() => setHostInput(getLocalBackendHost())}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>🏠 Local PC</Text>
+                <Text style={{ color: '#93C5FD', fontSize: 9, marginTop: 2 }}>Home Wi-Fi SUMO</Text>
+              </TouchableOpacity>
+            </View>
+
             <TextInput
-              style={[styles.textInput, { marginTop: 14 }]}
+              style={[styles.textInput, { marginTop: 6 }]}
               value={hostInput}
               onChangeText={setHostInput}
-              placeholder="e.g. 192.168.1.12 or smartway.ngrok-free.app"
+              placeholder="e.g. smartway-backend-ir79.onrender.com or 192.168.1.12"
               placeholderTextColor="#64748B"
               autoCapitalize="none"
               autoCorrect={false}
