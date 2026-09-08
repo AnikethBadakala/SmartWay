@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -16,6 +16,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
 import Constants from 'expo-constants';
+import * as Location from 'expo-location';
+import * as Speech from 'expo-speech';
 
 // Automatically detect host IP from Expo Go connection with fallback
 const getBackendHost = () => {
@@ -26,45 +28,96 @@ const getBackendHost = () => {
   return '192.168.1.12';
 };
 
-const HOST = getBackendHost();
-const WS_URL = `ws://${HOST}:8000/ws`;
-const API_URL = `http://${HOST}:8000`;
+const DEFAULT_HOST = getBackendHost();
+
+// Helper: Haversine distance in kilometers
+function calculateHaversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// Helper: Real-world road routing via OpenStreetMap / OSRM API across Hyderabad
+async function fetchOSRMRoute(origin: { lat: number; lon: number }, dest: { lat: number; lon: number }) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${origin.lon},${origin.lat};${dest.lon},${dest.lat}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json.routes && json.routes.length > 0) {
+      const route = json.routes[0];
+      const coords = route.geometry.coordinates.map((pt: [number, number]) => ({
+        latitude: pt[1],
+        longitude: pt[0],
+      }));
+      return {
+        coords,
+        distance_m: route.distance,
+        duration_s: route.duration,
+      };
+    }
+  } catch (e) {
+    console.log("OSRM routing notice:", e);
+  }
+  return null;
+}
+
+// Helper: Voice audio announcement for driver hands-free safety
+const speakAlert = (text: string) => {
+  try {
+    Speech.stop();
+    Speech.speak(text, { language: 'en-IN', rate: 1.0 });
+  } catch (e) {}
+};
 
 const DEFAULT_INCIDENTS = [
   {
     id: "i1",
     name: "Cyber Towers Junction",
-    address: "Hitec City Main Road",
-    lat: 17.45394,
-    lon: 78.41173
+    address: "Hitec City Main Road, Madhapur",
+    lat: 17.4504,
+    lon: 78.3808
   },
   {
     id: "i2",
     name: "Inorbit Mall Road",
-    address: "Durgam Cheruvu Link, Madhapur",
-    lat: 17.44348,
-    lon: 78.39361
+    address: "Durgam Cheruvu Link Road, Madhapur",
+    lat: 17.4398,
+    lon: 78.3922
   },
   {
     id: "i3",
     name: "Jubilee Hills Checkpost",
     address: "Road No. 36, Jubilee Hills",
-    lat: 17.45398,
-    lon: 78.41576
+    lat: 17.4328,
+    lon: 78.4116
   },
   {
     id: "i4",
-    name: "Durgam Cheruvu Bridge",
+    name: "Durgam Cheruvu Cable Bridge",
     address: "Cable Stayed Bridge, Madhapur",
-    lat: 17.43397,
-    lon: 78.40020
+    lat: 17.4362,
+    lon: 78.4061
   },
   {
     id: "i5",
     name: "Madhapur Metro Station",
     address: "Ayyappa Society Main Road",
-    lat: 17.45342,
-    lon: 78.41408
+    lat: 17.4485,
+    lon: 78.3908
+  },
+  {
+    id: "i6",
+    name: "Bio-Diversity Park Junction",
+    address: "Old Mumbai Highway, Gachibowli",
+    lat: 17.4326,
+    lon: 78.3697
   }
 ];
 
@@ -72,35 +125,97 @@ const DEFAULT_HOSPITALS = [
   {
     id: "h1",
     name: "Apollo Hospitals, Jubilee Hills",
-    address: "Road No. 72, Jubilee Hills",
-    lat: 17.44732,
-    lon: 78.40735
+    address: "Road No. 72, Film Nagar, Jubilee Hills",
+    lat: 17.4156,
+    lon: 78.4124,
+    icu_beds_available: 18,
+    trauma_level: "Level 1 Trauma"
   },
   {
     id: "h2",
     name: "Medicover Hospital, Hitec City",
-    address: "Opp. Cyber Towers, Madhapur",
-    lat: 17.45145,
-    lon: 78.39616
+    address: "Behind Cyber Towers, Madhapur",
+    lat: 17.4474,
+    lon: 78.3762,
+    icu_beds_available: 12,
+    trauma_level: "Level 2 Trauma"
   },
   {
     id: "h3",
     name: "KIMS Hospital, Kondapur",
-    address: "Hitec City - Kondapur Road",
-    lat: 17.45150,
-    lon: 78.39668
+    address: "Hitec City - Kondapur Main Road",
+    lat: 17.4725,
+    lon: 78.3582,
+    icu_beds_available: 15,
+    trauma_level: "Level 1 Trauma"
   },
   {
     id: "h4",
-    name: "Care Hospitals, Banjara Link",
-    address: "Road No. 1, Jubilee Hills",
-    lat: 17.45400,
-    lon: 78.41839
+    name: "Care Hospitals, Banjara Hills",
+    address: "Road No. 1, Prem Nagar, Banjara Hills",
+    lat: 17.4168,
+    lon: 78.4482,
+    icu_beds_available: 9,
+    trauma_level: "Level 2 Trauma"
+  },
+  {
+    id: "h5",
+    name: "AIG Hospitals, Gachibowli",
+    address: "Mindspace Road, Gachibowli",
+    lat: 17.4422,
+    lon: 78.3615,
+    icu_beds_available: 22,
+    trauma_level: "Level 1 Comprehensive Trauma"
+  },
+  {
+    id: "h6",
+    name: "Continental Hospitals, Financial District",
+    address: "IT Park, Nanakramguda, Gachibowli",
+    lat: 17.4184,
+    lon: 78.3486,
+    icu_beds_available: 16,
+    trauma_level: "Level 1 Trauma"
+  },
+  {
+    id: "h7",
+    name: "Yashoda Hospitals, Hitec City",
+    address: "Opp. Mindspace, Hitec City Main Road",
+    lat: 17.4485,
+    lon: 78.3842,
+    icu_beds_available: 20,
+    trauma_level: "Level 1 Super Specialty"
   }
 ];
 
 export default function HomeScreen() {
-  const [connectionStatus, setConnectionStatus] = useState<string>(`Connecting (${HOST})...`);
+  const [backendHost, setBackendHost] = useState<string>(DEFAULT_HOST);
+  const [hostModalVisible, setHostModalVisible] = useState<boolean>(false);
+  const [hostInput, setHostInput] = useState<string>(DEFAULT_HOST);
+
+  const API_URL = useMemo(() => {
+    if (backendHost.startsWith('http://') || backendHost.startsWith('https://')) {
+      return backendHost.replace(/\/+$/, '');
+    }
+    return `http://${backendHost}:8000`;
+  }, [backendHost]);
+
+  const WS_URL = useMemo(() => {
+    if (backendHost.startsWith('https://')) {
+      return `wss://${backendHost.replace('https://', '').replace(/\/+$/, '')}/ws`;
+    }
+    if (backendHost.startsWith('http://')) {
+      return `ws://${backendHost.replace('http://', '').replace(/\/+$/, '')}/ws`;
+    }
+    return `ws://${backendHost}:8000/ws`;
+  }, [backendHost]);
+
+  // Operational Mode: Real Driver (Live GPS on iOS in Hyderabad) vs. Simulation (SUMO)
+  const [appMode, setAppMode] = useState<'real_driver' | 'simulation'>('real_driver');
+  const [deviceLocation, setDeviceLocation] = useState<Location.LocationObject | null>(null);
+  const [hasLocationPermission, setHasLocationPermission] = useState<boolean>(false);
+  const [lastSpokenSignal, setLastSpokenSignal] = useState<string | null>(null);
+
+  const [connectionStatus, setConnectionStatus] = useState<string>(`Connecting (${backendHost})...`);
   const [isSimRunning, setIsSimRunning] = useState<boolean>(false);
   const [ambulance, setAmbulance] = useState<any>(null);
 
@@ -146,8 +261,8 @@ export default function HomeScreen() {
   // Authentication & Role State
   const [currentUser, setCurrentUser] = useState<any>(null); // null = show login screen
   const [loginRole, setLoginRole] = useState<'driver' | 'admin'>('driver');
-  const [loginId, setLoginId] = useState<string>('driver1');
-  const [loginPassword, setLoginPassword] = useState<string>('123');
+  const [loginId, setLoginId] = useState<string>('');
+  const [loginPassword, setLoginPassword] = useState<string>('');
   const [loginLoading, setLoginLoading] = useState<boolean>(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -366,7 +481,7 @@ export default function HomeScreen() {
         };
 
         ws.onerror = () => {
-          setConnectionStatus(`🟡 Reconnecting (${HOST})...`);
+          setConnectionStatus(`🟡 Reconnecting (${backendHost})...`);
         };
 
         ws.onclose = () => {
@@ -385,7 +500,99 @@ export default function HomeScreen() {
       if (ws) ws.close();
       if (reconnectTimer) clearTimeout(reconnectTimer);
     };
-  }, []);
+  }, [WS_URL, API_URL, backendHost]);
+
+  // Real-time GPS Location Tracking for iOS Mobile Driver in Hyderabad
+  useEffect(() => {
+    let locationSubscription: any = null;
+
+    const startLocationService = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          console.log("Location permission not granted");
+          return;
+        }
+        setHasLocationPermission(true);
+
+        const initialPos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        setDeviceLocation(initialPos);
+
+        if (appMode === 'real_driver' && !isDispatched) {
+          setAmbulance({
+            latitude: initialPos.coords.latitude,
+            longitude: initialPos.coords.longitude,
+            speed: Math.round((initialPos.coords.speed || 0) * 3.6),
+          });
+        }
+
+        locationSubscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.BestForNavigation,
+            timeInterval: 1000,
+            distanceInterval: 2,
+          },
+          async (loc) => {
+            setDeviceLocation(loc);
+
+            if (appMode === 'real_driver') {
+              const currentSpeed = Math.max(0, Math.round((loc.coords.speed || 0) * 3.6));
+              setAmbulanceSpeed(currentSpeed);
+              setAmbulance({
+                latitude: loc.coords.latitude,
+                longitude: loc.coords.longitude,
+                speed: currentSpeed,
+                heading: loc.coords.heading || 0,
+              });
+
+              // Stream telemetry to backend if active dispatch
+              if (isDispatched) {
+                try {
+                  const res = await fetch(`${API_URL}/driver/telemetry`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      lat: loc.coords.latitude,
+                      lon: loc.coords.longitude,
+                      speed: currentSpeed,
+                      heading: loc.coords.heading || 0,
+                      accuracy: loc.coords.accuracy || 0,
+                      driver_id: currentUser?.username || 'driver1',
+                      driver_name: currentUser?.name || 'Rajesh Kumar',
+                      vehicle_id: currentUser?.vehicle_id || 'AMB-108',
+                      mission_id: dispatchedData?.mission_id,
+                    }),
+                  });
+
+                  if (res.ok) {
+                    const telRes = await res.json();
+                    if (telRes.green_wave_active && telRes.green_wave_active !== lastSpokenSignal) {
+                      setLastSpokenSignal(telRes.green_wave_active);
+                      speakAlert(`Green wave clear at ${telRes.green_wave_active}`);
+                    }
+                  }
+                } catch (err) {
+                  // Silent catch for network hiccups while driving
+                }
+              }
+            }
+          }
+        );
+      } catch (err) {
+        console.log("Error starting location tracking:", err);
+      }
+    };
+
+    startLocationService();
+
+    return () => {
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
+    };
+  }, [appMode, isDispatched, API_URL, dispatchedData, currentUser, lastSpokenSignal]);
 
   const fetchAnalytics = async () => {
     setAnalyticsLoading(true);
@@ -473,8 +680,100 @@ export default function HomeScreen() {
     setSelectedHospital(item);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
+    // REAL DRIVER MOVEMENT DISPATCH (Live GPS on iOS in Hyderabad)
+    if (appMode === 'real_driver') {
+      try {
+        const originLat = selectedIncident?.lat || deviceLocation?.coords?.latitude || 17.4504;
+        const originLon = selectedIncident?.lon || deviceLocation?.coords?.longitude || 78.3808;
+        const originName = selectedIncident?.name || "📍 My Live Location (Hyderabad)";
+
+        // 1. Fetch real road geometry across Hyderabad via OSRM
+        const osrmData = await fetchOSRMRoute(
+          { lat: originLat, lon: originLon },
+          { lat: item.lat, lon: item.lon }
+        );
+
+        let realCoords: any[] = [];
+        let realDistanceM = 0;
+        if (osrmData && osrmData.coords.length > 0) {
+          realCoords = osrmData.coords;
+          realDistanceM = osrmData.distance_m;
+        } else {
+          realCoords = [
+            { latitude: originLat, longitude: originLon },
+            { latitude: item.lat, longitude: item.lon }
+          ];
+          realDistanceM = calculateHaversineDistance(originLat, originLon, item.lat, item.lon) * 1000;
+        }
+
+        const res = await fetch(`${API_URL}/driver/dispatch_real`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            pickup_lat: originLat,
+            pickup_lon: originLon,
+            pickup_name: originName,
+            hospital_id: item.id,
+            driver_name: currentUser?.name || "Rajesh Kumar",
+            driver_id: currentUser?.username || "driver1",
+            vehicle_id: currentUser?.vehicle_id || "AMB-108",
+            route_coords: realCoords,
+            route_length_m: realDistanceM
+          })
+        });
+
+        const data = await res.json();
+        if (res.ok && !data.error) {
+          setIsDispatched(true);
+          setIsSimRunning(true);
+          setOptimalRoute(realCoords);
+          setDispatchedData(data);
+          setRouteStats({
+            optimalKm: (realDistanceM / 1000).toFixed(1),
+            alt1Km: ((realDistanceM * 1.25) / 1000).toFixed(1),
+            alt2Km: ((realDistanceM * 1.40) / 1000).toFixed(1),
+            incident: originName,
+            hospital: item.name,
+            signals: data.signals_count || 12
+          });
+          setModalVisible(false);
+
+          // Audio voice cue for the driver
+          speakAlert(`Emergency corridor active to ${item.name}. Green wave signals engaged.`);
+
+          if (mapRef.current) {
+            mapRef.current.fitToCoordinates(
+              [
+                { latitude: originLat, longitude: originLon },
+                { latitude: item.lat, longitude: item.lon }
+              ],
+              {
+                edgePadding: { top: 70, right: 70, bottom: 70, left: 70 },
+                animated: true
+              }
+            );
+          }
+        } else {
+          setDispatchError(data.error || "Failed to dispatch real driver mission.");
+        }
+      } catch (e: any) {
+        if (e.name === "AbortError") {
+          setDispatchError("Route request timed out. Please tap retry.");
+        } else {
+          setDispatchError(`Dispatch failed: ${e.message || "Network Timeout"}. Check backend host.`);
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        setIsDispatching(false);
+        setDispatchingHospitalId(null);
+      }
+      return;
+    }
+
+    // SIMULATION MODE (SUMO TraCI)
     try {
       const res = await fetch(
         `${API_URL}/dispatch?incident_id=${item.id === selectedIncident?.id ? item.id : selectedIncident?.id}&hospital_id=${item.id}&driver_name=${encodeURIComponent(currentUser?.name || "Rajesh Kumar")}&driver_id=${encodeURIComponent(currentUser?.username || "driver1")}&vehicle_id=${encodeURIComponent(currentUser?.vehicle_id || "AMB-108")}`,
@@ -562,6 +861,20 @@ export default function HomeScreen() {
       );
     }
   };
+
+  const sortedHospitals = useMemo(() => {
+    const originLat = selectedIncident?.lat || deviceLocation?.coords?.latitude || 17.4504;
+    const originLon = selectedIncident?.lon || deviceLocation?.coords?.longitude || 78.3808;
+
+    return [...hospitals].map(h => {
+      const dist = calculateHaversineDistance(originLat, originLon, h.lat, h.lon);
+      return {
+        ...h,
+        distanceKm: dist.toFixed(1),
+        etaMin: Math.max(2, Math.round((dist / 35) * 60))
+      };
+    }).sort((a, b) => parseFloat(a.distanceKm) - parseFloat(b.distanceKm));
+  }, [hospitals, selectedIncident, deviceLocation]);
 
   if (!currentUser) {
     return (
@@ -738,12 +1051,58 @@ export default function HomeScreen() {
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={styles.statusBadge}>{connectionStatus}</Text>
+          <TouchableOpacity onPress={() => setHostModalVisible(true)}>
+            <Text style={styles.statusBadge}>{connectionStatus} ⚙️</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
             <Text style={styles.logoutButtonText}>🚪 Logout</Text>
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Driver Operational Mode Switcher Bar (Real Movement vs Simulation) */}
+      {currentUser?.role === 'driver' && (
+        <View style={styles.modeSwitcherBar}>
+          <TouchableOpacity
+            style={[
+              styles.modeTab,
+              appMode === 'real_driver' && styles.modeTabActiveReal,
+            ]}
+            onPress={() => {
+              setAppMode('real_driver');
+              speakAlert("Real movement mode enabled. Tracking live GPS in Hyderabad.");
+            }}
+          >
+            <Text
+              style={[
+                styles.modeTabText,
+                appMode === 'real_driver' && styles.modeTabTextActive,
+              ]}
+            >
+              🚗 Real Driver (Live GPS)
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.modeTab,
+              appMode === 'simulation' && styles.modeTabActiveSim,
+            ]}
+            onPress={() => {
+              setAppMode('simulation');
+            }}
+          >
+            <Text
+              style={[
+                styles.modeTabText,
+                appMode === 'simulation' && styles.modeTabTextActive,
+              ]}
+            >
+              🎮 SUMO Simulation
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Admin View Switcher (Map vs Analytics) */}
       {currentUser?.role === 'admin' && (
@@ -1346,6 +1705,42 @@ export default function HomeScreen() {
                 <FlatList
                   data={incidents}
                   keyExtractor={(item) => item.id}
+                  ListHeaderComponent={() => (
+                    <TouchableOpacity
+                      style={[
+                        styles.locationCard,
+                        { borderColor: '#10B981', borderWidth: 2, backgroundColor: '#064E3B', marginBottom: 12 }
+                      ]}
+                      onPress={() => {
+                        if (deviceLocation) {
+                          handleSelectIncident({
+                            id: 'live_gps',
+                            name: '📍 My Live Location (Hyderabad)',
+                            address: `${deviceLocation.coords.latitude.toFixed(4)}°N, ${deviceLocation.coords.longitude.toFixed(4)}°E (Accuracy: ±${Math.round(deviceLocation.coords.accuracy || 5)}m)`,
+                            lat: deviceLocation.coords.latitude,
+                            lon: deviceLocation.coords.longitude,
+                          });
+                        } else {
+                          Alert.alert("Acquiring GPS", "Detecting your phone's GPS position in Hyderabad. Please verify location permissions.");
+                        }
+                      }}
+                    >
+                      <View style={[styles.locationIconWrap, { backgroundColor: '#059669' }]}>
+                        <Text style={styles.locationIcon}>🎯</Text>
+                      </View>
+                      <View style={styles.locationTextWrap}>
+                        <Text style={[styles.locationName, { color: '#34D399', fontWeight: '800' }]}>
+                          📍 Use My Current Location
+                        </Text>
+                        <Text style={[styles.locationAddress, { color: '#A7F3D0' }]}>
+                          {deviceLocation
+                            ? `${deviceLocation.coords.latitude.toFixed(4)}°N, ${deviceLocation.coords.longitude.toFixed(4)}°E • Real-time GPS Fix`
+                            : "Acquiring GPS coordinates in Hyderabad..."}
+                        </Text>
+                      </View>
+                      <Text style={[styles.locationSelectArrow, { color: '#34D399' }]}>➔</Text>
+                    </TouchableOpacity>
+                  )}
                   renderItem={({ item }) => (
                     <TouchableOpacity
                       style={styles.locationCard}
@@ -1392,7 +1787,7 @@ export default function HomeScreen() {
                 )}
 
                 <FlatList
-                  data={hospitals}
+                  data={sortedHospitals}
                   keyExtractor={(item) => item.id}
                   renderItem={({ item }) => {
                     const isThisLoading = isDispatching && dispatchingHospitalId === item.id;
@@ -1415,11 +1810,18 @@ export default function HomeScreen() {
                           )}
                         </View>
                         <View style={styles.locationTextWrap}>
-                          <Text style={styles.locationName}>{item.name}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Text style={[styles.locationName, { flex: 1 }]}>{item.name}</Text>
+                            {item.distanceKm && (
+                              <View style={styles.distBadge}>
+                                <Text style={styles.distBadgeText}>{item.distanceKm} km</Text>
+                              </View>
+                            )}
+                          </View>
                           <Text style={[styles.locationAddress, isThisLoading && { color: '#CA8A04', fontWeight: '700' }]}>
                             {isThisLoading
-                              ? "Routing Green Wave & Syncing Signals..."
-                              : `${item.address} • ${item.icu_beds_available || 8} ICU Beds Available`}
+                              ? "Computing Real Road Corridor & Preemption..."
+                              : `${item.etaMin ? `~${item.etaMin} min • ` : ""}${item.address} • ${item.icu_beds_available || 8} ICU Beds`}
                           </Text>
                         </View>
                         <Text style={[styles.locationSelectArrow, { color: isThisLoading ? '#CA8A04' : '#16A34A' }]}>
@@ -1480,6 +1882,54 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Backend Host & Tunnel Config Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={hostModalVisible}
+        onRequestClose={() => setHostModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>🌐 Server & Tunnel Settings</Text>
+            <Text style={styles.modalSubtitle}>
+              When driving on mobile cellular data (4G/5G) in Hyderabad, enter your Ngrok tunnel URL or your local network IP:
+            </Text>
+
+            <TextInput
+              style={[styles.textInput, { marginTop: 14 }]}
+              value={hostInput}
+              onChangeText={setHostInput}
+              placeholder="e.g. 192.168.1.12 or smartway.ngrok-free.app"
+              placeholderTextColor="#64748B"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+              <TouchableOpacity
+                style={[styles.modalCloseButton, { flex: 1 }]}
+                onPress={() => setHostModalVisible(false)}
+              >
+                <Text style={styles.modalCloseText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.loginSubmitButton, { flex: 1, marginTop: 0 }]}
+                onPress={() => {
+                  if (hostInput.trim()) {
+                    setBackendHost(hostInput.trim());
+                    setConnectionStatus(`Connecting (${hostInput.trim()})...`);
+                  }
+                  setHostModalVisible(false);
+                }}
+              >
+                <Text style={styles.loginSubmitButtonText}>Save & Connect</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -2745,5 +3195,57 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 11,
     fontWeight: '600',
+  },
+
+  // Operational Mode Switcher Bar Styles
+  modeSwitcherBar: {
+    flexDirection: 'row',
+    backgroundColor: '#0F172A',
+    padding: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
+    gap: 8,
+  },
+  modeTab: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  modeTabActiveReal: {
+    backgroundColor: '#065F46',
+    borderColor: '#10B981',
+  },
+  modeTabActiveSim: {
+    backgroundColor: '#1E3A8A',
+    borderColor: '#3B82F6',
+  },
+  modeTabText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  modeTabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+  },
+  distBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#059669',
+    marginLeft: 8,
+  },
+  distBadgeText: {
+    color: '#34D399',
+    fontSize: 11,
+    fontWeight: '800',
   },
 });

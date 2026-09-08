@@ -71,28 +71,79 @@ def init_db():
     )
     """)
 
-    # Seed Initial Hospitals if empty
-    cursor.execute("SELECT COUNT(*) FROM hospitals")
-    if cursor.fetchone()[0] == 0:
-        hospitals = [
-            ("h1", "Apollo Hospitals, Jubilee Hills", "Road No. 72, Jubilee Hills", "277794201#1", 17.44732, 78.40735, 14, "Level 1 Trauma"),
-            ("h2", "Medicover Hospital, Hitec City", "Opp. Cyber Towers, Madhapur", "313351521#1", 17.45145, 78.39616, 8, "Level 2 Trauma"),
-            ("h3", "KIMS Hospital, Kondapur", "Hitec City - Kondapur Road", "113164523#0", 17.45150, 78.39668, 12, "Level 1 Trauma"),
-            ("h4", "Care Hospitals, Banjara Link", "Road No. 1, Jubilee Hills", "419423735#2", 17.45400, 78.41839, 6, "Level 2 Trauma")
-        ]
-        cursor.executemany("INSERT INTO hospitals VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')", hospitals)
+    # 5. Real Hyderabad Traffic Signals Table (for Real Movement Mode)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS hyderabad_signals (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        lat REAL NOT NULL,
+        lon REAL NOT NULL,
+        state TEXT DEFAULT 'RED',
+        preempted_at REAL,
+        corridor TEXT
+    )
+    """)
+
+    # Seed / Upsert Real Hyderabad Hospitals
+    real_hospitals = [
+        ("h1", "Apollo Hospitals, Jubilee Hills", "Road No. 72, Film Nagar, Jubilee Hills", "277794201#1", 17.4156, 78.4124, 18, "Level 1 Trauma"),
+        ("h2", "Medicover Hospital, Hitec City", "Behind Cyber Towers, Madhapur", "313351521#1", 17.4474, 78.3762, 12, "Level 2 Trauma"),
+        ("h3", "KIMS Hospital, Kondapur", "Hitec City - Kondapur Main Road", "113164523#0", 17.4725, 78.3582, 15, "Level 1 Trauma"),
+        ("h4", "Care Hospitals, Banjara Hills", "Road No. 1, Prem Nagar, Banjara Hills", "419423735#2", 17.4168, 78.4482, 9, "Level 2 Trauma"),
+        ("h5", "AIG Hospitals, Gachibowli", "Mindspace Road, Gachibowli", "312015898#2", 17.4422, 78.3615, 22, "Level 1 Comprehensive Trauma"),
+        ("h6", "Continental Hospitals, Financial District", "IT Park, Nanakramguda, Gachibowli", "28656536#1", 17.4184, 78.3486, 16, "Level 1 Trauma"),
+        ("h7", "Yashoda Hospitals, Hitec City", "Opp. Mindspace, Hitec City Main Road", "1531558042#1", 17.4485, 78.3842, 20, "Level 1 Super Specialty")
+    ]
+    for hosp in real_hospitals:
+        cursor.execute("""
+            INSERT INTO hospitals (id, name, address, edge, lat, lon, icu_beds_available, trauma_level, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                address=excluded.address,
+                lat=excluded.lat,
+                lon=excluded.lon,
+                icu_beds_available=excluded.icu_beds_available,
+                trauma_level=excluded.trauma_level
+        """, hosp)
 
     # Seed Initial Incidents if empty
     cursor.execute("SELECT COUNT(*) FROM incidents")
     if cursor.fetchone()[0] == 0:
         incidents = [
-            ("i1", "Cyber Towers Junction", "Hitec City Main Road", "292385861#0", 17.45394, 78.41173, "High"),
-            ("i2", "Inorbit Mall Road", "Durgam Cheruvu Link, Madhapur", "312015898#2", 17.44348, 78.39361, "Medium"),
-            ("i3", "Jubilee Hills Checkpost", "Road No. 36, Jubilee Hills", "1531558042#1", 17.45398, 78.41576, "High"),
-            ("i4", "Durgam Cheruvu Bridge", "Cable Stayed Bridge, Madhapur", "28656536#1", 17.43397, 78.40020, "Critical"),
-            ("i5", "Madhapur Metro Station", "Ayyappa Society Main Road", "1424057308#0", 17.45342, 78.41408, "Medium")
+            ("i1", "Cyber Towers Junction", "Hitec City Main Road", "292385861#0", 17.4504, 78.3808, "High"),
+            ("i2", "Inorbit Mall Road", "Durgam Cheruvu Link, Madhapur", "312015898#2", 17.4398, 78.3922, "Medium"),
+            ("i3", "Jubilee Hills Checkpost", "Road No. 36, Jubilee Hills", "1531558042#1", 17.4328, 78.4116, "High"),
+            ("i4", "Durgam Cheruvu Bridge", "Cable Stayed Bridge, Madhapur", "28656536#1", 17.4362, 78.4061, "Critical"),
+            ("i5", "Madhapur Metro Station", "Ayyappa Society Main Road", "1424057308#0", 17.4485, 78.3908, "Medium")
         ]
         cursor.executemany("INSERT INTO incidents VALUES (?, ?, ?, ?, ?, ?, ?)", incidents)
+
+    # Seed Real Hyderabad Traffic Signals
+    real_signals = [
+        ("sig_hyd_1", "Cyber Towers Junction", 17.4504, 78.3808, "RED", "Hitec City Corridor"),
+        ("sig_hyd_2", "Mindspace Circle Junction", 17.4429, 78.3792, "RED", "Mindspace Corridor"),
+        ("sig_hyd_3", "Bio-Diversity Park Junction", 17.4326, 78.3697, "RED", "Gachibowli Arterial"),
+        ("sig_hyd_4", "Gachibowli 'T' Junction", 17.4401, 78.3489, "RED", "Outer Ring Road Link"),
+        ("sig_hyd_5", "Jubilee Hills Checkpost", 17.4328, 78.4116, "RED", "Road No. 36 Corridor"),
+        ("sig_hyd_6", "Road No. 45 / Durgam Link", 17.4362, 78.4061, "RED", "Cable Bridge Corridor"),
+        ("sig_hyd_7", "Madhapur Police Station Junction", 17.4485, 78.3908, "RED", "Madhapur Arterial"),
+        ("sig_hyd_8", "Kothaguda Junction", 17.4608, 78.3639, "RED", "Botanical Garden Road"),
+        ("sig_hyd_9", "Kondapur RTO Junction", 17.4695, 78.3582, "RED", "Kondapur Central"),
+        ("sig_hyd_10", "Inorbit Mall Rotary", 17.4398, 78.3922, "RED", "Durgam Cheruvu West"),
+        ("sig_hyd_11", "IKEA Rotary Junction", 17.4375, 78.3745, "RED", "Hitec City Phase 2"),
+        ("sig_hyd_12", "Wipro Circle Junction", 17.4241, 78.3458, "RED", "Financial District")
+    ]
+    for sig in real_signals:
+        cursor.execute("""
+            INSERT INTO hyderabad_signals (id, name, lat, lon, state, corridor)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name,
+                lat=excluded.lat,
+                lon=excluded.lon,
+                corridor=excluded.corridor
+        """, sig)
 
     conn.commit()
     conn.close()
@@ -108,6 +159,28 @@ def get_all_incidents():
     rows = conn.execute("SELECT * FROM incidents").fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+def get_hyderabad_signals():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM hyderabad_signals").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def update_signal_state(signal_id, state):
+    conn = get_db()
+    preempted_at = time.time() if state == "GREEN" else None
+    conn.execute(
+        "UPDATE hyderabad_signals SET state=?, preempted_at=? WHERE id=?",
+        (state, preempted_at, signal_id)
+    )
+    conn.commit()
+    conn.close()
+
+def reset_all_signals():
+    conn = get_db()
+    conn.execute("UPDATE hyderabad_signals SET state='RED', preempted_at=NULL")
+    conn.commit()
+    conn.close()
 
 def report_congestion(road_name, edge, slowdown_pct=75):
     conn = get_db()

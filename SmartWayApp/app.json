@@ -8,7 +8,15 @@
     "scheme": "smartwayapp",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "SmartWay requires your live GPS location to navigate emergency corridors and preempt traffic signals in Hyderabad.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "SmartWay requires background location to maintain real-time green wave preemption while driving in Hyderabad.",
+        "UIBackgroundModes": [
+          "location"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {

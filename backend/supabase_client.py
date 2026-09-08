@@ -5,6 +5,21 @@ import os
 import bcrypt
 import database
 
+def load_env_file():
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+        except Exception:
+            pass
+
+load_env_file()
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://lrydqmktaoxtbjzsqigu.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxyeWRxbWt0YW94dGJqenNxaWd1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4NTc0MjEsImV4cCI6MjEwNDQzMzQyMX0.PnGTBjWKE1lj7xkVmwAdHQqw_TVyMNT5ivvFUNPcT2w")
 

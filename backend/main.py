@@ -3,7 +3,10 @@ import json
 import math
 import os
 import time
-import traci
+try:
+    import traci
+except ImportError:
+    traci = None
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 import database
@@ -49,6 +52,51 @@ CURRENT_DISPATCH_INFO = {
 ROUTE_SIGNALS = []
 connected_clients = set()
 ROUTE_CACHE = {}
+
+REAL_DRIVER_STATE = {
+    "active": False,
+    "lat": 17.4485,
+    "lon": 78.3908,
+    "speed": 0.0,
+    "heading": 0.0,
+    "accuracy": 0.0,
+    "driver_name": "Rajesh Kumar",
+    "driver_id": "driver1",
+    "vehicle_id": "AMB-108",
+    "mission_id": None,
+    "last_update": 0,
+    "target_hospital": None,
+    "target_lat": None,
+    "target_lon": None,
+    "route_coords": [],
+    "bypassed_signals": set(),
+    "time_saved_s": 0,
+    "start_time": 0
+}
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    R = 6371000.0  # Earth's radius in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi / 2.0) ** 2 + \
+        math.cos(phi1) * math.cos(phi2) * \
+        math.sin(delta_lambda / 2.0) ** 2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return R * c
+
+async def broadcast_to_clients(payload: dict):
+    if not connected_clients:
+        return
+    msg = json.dumps(payload)
+    dead_clients = set()
+    for client in list(connected_clients):
+        try:
+            await client.send_text(msg)
+        except Exception:
+            dead_clients.add(client)
+    connected_clients.difference_update(dead_clients)
 
 def edges_to_coords(edge_list):
     coords = []
@@ -389,8 +437,11 @@ async def simulation_loop():
 
 @app.on_event("startup")
 async def startup_event():
-    print("Pre-warming SUMO simulation engine...")
-    await start_sim(is_user_request=False)
+    if traci is not None:
+        print("Pre-warming SUMO simulation engine...")
+        await start_sim(is_user_request=False)
+    else:
+        print("SmartWay cloud startup: Real Movement mode active (SUMO traci optional)")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -411,29 +462,36 @@ async def get_incidents():
 
 @app.get("/status")
 async def get_status():
-    global SIMULATION_RUNNING, AMBULANCE_IN_TRANSIT, SESSION_ACTIVE
+    global SIMULATION_RUNNING, AMBULANCE_IN_TRANSIT, SESSION_ACTIVE, REAL_DRIVER_STATE
+    is_active = SESSION_ACTIVE or AMBULANCE_IN_TRANSIT or REAL_DRIVER_STATE["active"]
     return {
-        "running": SESSION_ACTIVE or AMBULANCE_IN_TRANSIT,
-        "sim_running": SESSION_ACTIVE or AMBULANCE_IN_TRANSIT,
-        "in_transit": AMBULANCE_IN_TRANSIT
+        "running": is_active,
+        "sim_running": is_active,
+        "in_transit": AMBULANCE_IN_TRANSIT or REAL_DRIVER_STATE["active"],
+        "is_real_driver": REAL_DRIVER_STATE["active"]
     }
 
 @app.get("/fleet")
 async def get_active_fleet():
-    global CURRENT_DISPATCH_INFO, AMBULANCE_IN_TRANSIT
+    global CURRENT_DISPATCH_INFO, AMBULANCE_IN_TRANSIT, REAL_DRIVER_STATE
+    is_live = AMBULANCE_IN_TRANSIT or REAL_DRIVER_STATE["active"]
+    amb1_lat = REAL_DRIVER_STATE["lat"] if REAL_DRIVER_STATE["active"] else 17.4485
+    amb1_lon = REAL_DRIVER_STATE["lon"] if REAL_DRIVER_STATE["active"] else 78.3908
+    amb1_speed = REAL_DRIVER_STATE["speed"] if REAL_DRIVER_STATE["active"] else (55.0 if AMBULANCE_IN_TRANSIT else 0)
+
     return {
         "fleet": [
             {
                 "id": "AMB-108",
-                "name": "AMB-108 Rapid",
+                "name": "AMB-108 Rapid (Live iOS)" if REAL_DRIVER_STATE["active"] else "AMB-108 Rapid",
                 "driver": CURRENT_DISPATCH_INFO.get("driver_name", "Rajesh Kumar"),
                 "driver_id": CURRENT_DISPATCH_INFO.get("driver_id", "driver1"),
-                "status": "IN_TRANSIT" if AMBULANCE_IN_TRANSIT else "STANDBY",
+                "status": "IN_TRANSIT" if is_live else "STANDBY",
                 "source": CURRENT_DISPATCH_INFO.get("incident", "Madhapur Central Base"),
                 "destination": CURRENT_DISPATCH_INFO.get("hospital", "Standby Zone"),
-                "speed": 55.0 if AMBULANCE_IN_TRANSIT else 0,
-                "lat": 17.4485,
-                "lon": 78.3908,
+                "speed": amb1_speed,
+                "lat": amb1_lat,
+                "lon": amb1_lon,
                 "signals_cleared": len(CURRENT_DISPATCH_INFO.get("bypassed_tls", set())),
                 "time_saved_s": CURRENT_DISPATCH_INFO.get("time_saved", 0)
             },
@@ -456,6 +514,8 @@ async def get_active_fleet():
 
 async def ensure_sumo_alive():
     global SIMULATION_RUNNING
+    if traci is None:
+        return True
     if SIMULATION_RUNNING:
         try:
             traci.simulation.getTime()
@@ -472,6 +532,8 @@ async def ensure_sumo_alive():
 @app.get("/start_sim")
 async def start_sim(is_user_request: bool = True):
     global SIMULATION_RUNNING, SESSION_ACTIVE
+    if traci is None:
+        return {"status": "SUMO not installed on this cloud environment. Real Movement Mode active."}
     if is_user_request:
         SESSION_ACTIVE = True
     if SIMULATION_RUNNING:
@@ -762,13 +824,361 @@ async def apply_reroute():
         CURRENT_DISPATCH_INFO["pending_reroute"] = None
         return {"status": "reroute_applied", "message": "Dynamic bypass active."}
 
+async def process_driver_telemetry(data: dict):
+    global REAL_DRIVER_STATE, CURRENT_DISPATCH_INFO, ROUTE_SIGNALS, CURRENT_MISSION_ID
+    lat = float(data.get("lat", REAL_DRIVER_STATE["lat"]))
+    lon = float(data.get("lon", REAL_DRIVER_STATE["lon"]))
+    speed = float(data.get("speed", 0.0))  # km/h
+    heading = float(data.get("heading", 0.0))
+    accuracy = float(data.get("accuracy", 0.0))
+    driver_name = data.get("driver_name", REAL_DRIVER_STATE["driver_name"])
+    driver_id = data.get("driver_id", REAL_DRIVER_STATE["driver_id"])
+    vehicle_id = data.get("vehicle_id", REAL_DRIVER_STATE["vehicle_id"])
+    mission_id = data.get("mission_id", REAL_DRIVER_STATE.get("mission_id"))
+
+    REAL_DRIVER_STATE["active"] = True
+    REAL_DRIVER_STATE["lat"] = lat
+    REAL_DRIVER_STATE["lon"] = lon
+    REAL_DRIVER_STATE["speed"] = speed
+    REAL_DRIVER_STATE["heading"] = heading
+    REAL_DRIVER_STATE["accuracy"] = accuracy
+    REAL_DRIVER_STATE["driver_name"] = driver_name
+    REAL_DRIVER_STATE["driver_id"] = driver_id
+    REAL_DRIVER_STATE["vehicle_id"] = vehicle_id
+    REAL_DRIVER_STATE["last_update"] = time.time()
+
+    # If ROUTE_SIGNALS is empty, populate from database.get_hyderabad_signals()
+    if not ROUTE_SIGNALS:
+        signals_from_db = database.get_hyderabad_signals()
+        for s in signals_from_db:
+            ROUTE_SIGNALS.append({
+                "id": s["id"],
+                "name": s["name"],
+                "lat": s["lat"],
+                "lon": s["lon"],
+                "state": s.get("state", "RED")
+            })
+
+    # Traffic Signal Preemption: Green wave when within 250m!
+    active_preempted_signal = None
+    signals_with_dist = []
+    for sig in ROUTE_SIGNALS:
+        dist = haversine_distance(lat, lon, sig["lat"], sig["lon"])
+        signals_with_dist.append((sig, dist))
+
+        if dist <= 250.0:
+            sig["state"] = "GREEN"
+            database.update_signal_state(sig["id"], "GREEN")
+            active_preempted_signal = sig["name"]
+            if sig["id"] not in CURRENT_DISPATCH_INFO["bypassed_tls"]:
+                CURRENT_DISPATCH_INFO["bypassed_tls"].add(sig["id"])
+                CURRENT_DISPATCH_INFO["time_saved"] += 45
+                REAL_DRIVER_STATE["time_saved_s"] = CURRENT_DISPATCH_INFO["time_saved"]
+        elif dist > 400.0 and sig["id"] in CURRENT_DISPATCH_INFO["bypassed_tls"]:
+            pass
+        elif sig["id"] not in CURRENT_DISPATCH_INFO["bypassed_tls"]:
+            sig["state"] = "RED"
+
+    signals_with_dist.sort(key=lambda s: s[1])
+    upcoming_hud = [
+        {
+            "name": s[0]["name"],
+            "state": s[0]["state"],
+            "distance_m": round(s[1]),
+            "status_text": f"{s[0]['state']} • {round(s[1])}m away"
+        }
+        for s in signals_with_dist[:3]
+    ]
+
+    out = {
+        "step": int(time.time()),
+        "type": "update",
+        "sim_running": True,
+        "is_real_driver": True,
+        "ambulance": {
+            "lat": lat,
+            "lon": lon,
+            "speed": round(speed, 1),
+            "heading": heading,
+            "accuracy": accuracy,
+            "active": True
+        },
+        "green_wave_active": active_preempted_signal,
+        "upcoming_signals": upcoming_hud,
+        "telemetry": {
+            "bypassed": len(CURRENT_DISPATCH_INFO["bypassed_tls"]),
+            "time_saved": CURRENT_DISPATCH_INFO["time_saved"],
+            "speed": round(speed, 1)
+        },
+        "tls": [
+            {
+                "id": s["id"],
+                "name": s["name"],
+                "lat": s["lat"],
+                "lon": s["lon"],
+                "state": s["state"]
+            }
+            for s in ROUTE_SIGNALS
+        ],
+        "routes": {
+            "optimal": CURRENT_DISPATCH_INFO["optimal_route"],
+            "alt1": CURRENT_DISPATCH_INFO["alt_route_1"],
+            "alt2": CURRENT_DISPATCH_INFO["alt_route_2"]
+        },
+        "fleet": [
+            {
+                "id": vehicle_id or "AMB-108",
+                "name": f"{vehicle_id or 'AMB-108'} (Live iOS)",
+                "driver": driver_name,
+                "driver_id": driver_id,
+                "status": "IN_TRANSIT",
+                "source": CURRENT_DISPATCH_INFO.get("incident", "Live GPS Location"),
+                "destination": CURRENT_DISPATCH_INFO.get("hospital", "Hospital"),
+                "speed": round(speed, 1),
+                "lat": lat,
+                "lon": lon,
+                "signals_cleared": len(CURRENT_DISPATCH_INFO["bypassed_tls"]),
+                "time_saved_s": CURRENT_DISPATCH_INFO["time_saved"]
+            },
+            {
+                "id": "AMB-102",
+                "name": "AMB-102 Trauma",
+                "driver": "Priya Sharma",
+                "driver_id": "driver2",
+                "status": "STANDBY",
+                "source": "Jubilee Hills Base",
+                "destination": "Standby Zone",
+                "speed": 0,
+                "lat": 17.45398,
+                "lon": 78.41576,
+                "signals_cleared": 0,
+                "time_saved_s": 0
+            }
+        ],
+        "dispatch_info": {
+            "active": True,
+            "mission_id": CURRENT_MISSION_ID or mission_id,
+            "incident": CURRENT_DISPATCH_INFO.get("incident", "Live GPS"),
+            "hospital": CURRENT_DISPATCH_INFO.get("hospital", "Destination Hospital"),
+            "driver": driver_name,
+            "driver_id": driver_id,
+            "vehicle": vehicle_id,
+            "route_length_m": CURRENT_DISPATCH_INFO.get("route_length_m", 0),
+            "time_saved": CURRENT_DISPATCH_INFO.get("time_saved", 0),
+            "bypassed_count": len(CURRENT_DISPATCH_INFO.get("bypassed_tls", set()))
+        }
+    }
+
+    # Check arrival at destination hospital (within 70 meters)
+    target_lat = REAL_DRIVER_STATE.get("target_lat")
+    target_lon = REAL_DRIVER_STATE.get("target_lon")
+    if target_lat and target_lon:
+        hosp_dist = haversine_distance(lat, lon, target_lat, target_lon)
+        if hosp_dist <= 70.0:
+            time_taken_s = max(30, round(time.time() - CURRENT_DISPATCH_INFO.get("start_time", time.time())))
+            time_saved_s = CURRENT_DISPATCH_INFO["time_saved"]
+            bypassed_count = len(CURRENT_DISPATCH_INFO["bypassed_tls"])
+
+            if CURRENT_MISSION_ID:
+                database.record_mission_end(CURRENT_MISSION_ID, bypassed_count, time_saved_s)
+            try:
+                supabase_client.record_trip_completion({
+                    "mission_id": CURRENT_MISSION_ID or f"mis_real_{int(time.time()*1000)}",
+                    "driver_name": driver_name,
+                    "driver_id": driver_id,
+                    "vehicle_id": vehicle_id,
+                    "source_name": CURRENT_DISPATCH_INFO.get("incident", "Live Pickup"),
+                    "destination_name": CURRENT_DISPATCH_INFO.get("hospital", "Hospital"),
+                    "route_length_m": CURRENT_DISPATCH_INFO.get("route_length_m", 2500.0),
+                    "signals_count": len(ROUTE_SIGNALS),
+                    "signals_bypassed": bypassed_count,
+                    "time_taken_seconds": time_taken_s,
+                    "time_saved_seconds": time_saved_s,
+                    "average_speed_kmh": round(speed, 1) or 45.0
+                })
+            except Exception as se:
+                print("Supabase live mission sync note:", se)
+
+            out["journey_completed"] = {
+                "hospital": CURRENT_DISPATCH_INFO["hospital"] or "Destination Hospital",
+                "incident": CURRENT_DISPATCH_INFO["incident"] or "Live Pickup",
+                "driver": driver_name,
+                "vehicle": vehicle_id,
+                "bypassed_signals": bypassed_count,
+                "time_saved_seconds": time_saved_s,
+                "minutes_saved": round(time_saved_s / 60, 1),
+                "time_taken_seconds": time_taken_s,
+                "route_km": round(CURRENT_DISPATCH_INFO.get("route_length_m", 2500.0) / 1000, 2)
+            }
+            REAL_DRIVER_STATE["active"] = False
+
+    await broadcast_to_clients(out)
+    return out
+
+@app.post("/driver/telemetry")
+async def ingest_driver_telemetry(payload: dict):
+    out = await process_driver_telemetry(payload)
+    return {
+        "status": "telemetry_received",
+        "time_saved": out.get("telemetry", {}).get("time_saved", 0),
+        "bypassed": out.get("telemetry", {}).get("bypassed", 0),
+        "green_wave_active": out.get("green_wave_active"),
+        "upcoming_signals": out.get("upcoming_signals", [])
+    }
+
+@app.post("/driver/dispatch_real")
+async def dispatch_real_mission(payload: dict):
+    global REAL_DRIVER_STATE, CURRENT_DISPATCH_INFO, ROUTE_SIGNALS, CURRENT_MISSION_ID
+    pickup_lat = float(payload.get("pickup_lat", 17.4504))
+    pickup_lon = float(payload.get("pickup_lon", 78.3808))
+    pickup_name = payload.get("pickup_name", "Live GPS Location")
+    hospital_id = payload.get("hospital_id", "h1")
+    driver_name = payload.get("driver_name", "Rajesh Kumar")
+    driver_id = payload.get("driver_id", "driver1")
+    vehicle_id = payload.get("vehicle_id", "AMB-108")
+    route_coords = payload.get("route_coords", [])
+    route_length_m = float(payload.get("route_length_m", 0))
+
+    all_hospitals = database.get_all_hospitals()
+    target_hosp = next((h for h in all_hospitals if h["id"] == hospital_id), all_hospitals[0])
+
+    CURRENT_MISSION_ID = f"mis_real_{int(time.time()*1000)}"
+    CURRENT_DISPATCH_INFO["bypassed_tls"] = set()
+    CURRENT_DISPATCH_INFO["time_saved"] = 0
+    CURRENT_DISPATCH_INFO["driver_name"] = driver_name
+    CURRENT_DISPATCH_INFO["driver_id"] = driver_id
+    CURRENT_DISPATCH_INFO["vehicle_id"] = vehicle_id
+    CURRENT_DISPATCH_INFO["incident"] = pickup_name
+    CURRENT_DISPATCH_INFO["hospital"] = target_hosp["name"]
+    CURRENT_DISPATCH_INFO["start_time"] = time.time()
+    CURRENT_DISPATCH_INFO["optimal_route"] = route_coords
+    CURRENT_DISPATCH_INFO["route_length_m"] = route_length_m or haversine_distance(pickup_lat, pickup_lon, target_hosp["lat"], target_hosp["lon"])
+
+    # Load Hyderabad signals
+    db_signals = database.get_hyderabad_signals()
+    ROUTE_SIGNALS = [
+        {
+            "id": s["id"],
+            "name": s["name"],
+            "lat": s["lat"],
+            "lon": s["lon"],
+            "state": "RED"
+        }
+        for s in db_signals
+    ]
+    database.reset_all_signals()
+
+    REAL_DRIVER_STATE.update({
+        "active": True,
+        "lat": pickup_lat,
+        "lon": pickup_lon,
+        "driver_name": driver_name,
+        "driver_id": driver_id,
+        "vehicle_id": vehicle_id,
+        "mission_id": CURRENT_MISSION_ID,
+        "last_update": time.time(),
+        "target_hospital": target_hosp["name"],
+        "target_lat": target_hosp["lat"],
+        "target_lon": target_hosp["lon"],
+        "route_coords": route_coords,
+        "bypassed_signals": set(),
+        "time_saved_s": 0,
+        "start_time": time.time()
+    })
+
+    database.record_mission_start(
+        CURRENT_MISSION_ID,
+        vehicle_id,
+        pickup_name,
+        target_hosp["id"],
+        CURRENT_DISPATCH_INFO["route_length_m"]
+    )
+
+    # Broadcast initial real dispatch state
+    await broadcast_to_clients({
+        "type": "update",
+        "sim_running": True,
+        "is_real_driver": True,
+        "ambulance": {
+            "lat": pickup_lat,
+            "lon": pickup_lon,
+            "speed": 0,
+            "active": True
+        },
+        "routes": {
+            "optimal": route_coords,
+            "alt1": [],
+            "alt2": []
+        },
+        "tls": ROUTE_SIGNALS,
+        "dispatch_info": {
+            "active": True,
+            "mission_id": CURRENT_MISSION_ID,
+            "incident": pickup_name,
+            "hospital": target_hosp["name"],
+            "driver": driver_name,
+            "driver_id": driver_id,
+            "vehicle": vehicle_id,
+            "route_length_m": CURRENT_DISPATCH_INFO["route_length_m"],
+            "time_saved": 0,
+            "bypassed_count": 0
+        }
+    })
+
+    return {
+        "status": "real_driver_dispatched",
+        "mission_id": CURRENT_MISSION_ID,
+        "incident": pickup_name,
+        "hospital": target_hosp["name"],
+        "driver": driver_name,
+        "vehicle": vehicle_id,
+        "signals_count": len(ROUTE_SIGNALS),
+        "distance_m": round(CURRENT_DISPATCH_INFO["route_length_m"], 1)
+    }
+
+@app.get("/signals/hyderabad")
+async def get_hyderabad_signals_endpoint():
+    return {"signals": database.get_hyderabad_signals()}
+
+@app.post("/signals/preempt")
+async def preempt_signal_endpoint(payload: dict):
+    sig_id = payload.get("signal_id")
+    state = payload.get("state", "GREEN")
+    if sig_id:
+        database.update_signal_state(sig_id, state)
+        for s in ROUTE_SIGNALS:
+            if s["id"] == sig_id:
+                s["state"] = state
+        await broadcast_to_clients({
+            "type": "signal_update",
+            "signal_id": sig_id,
+            "state": state
+        })
+    return {"status": "updated", "signal_id": sig_id, "state": state}
+
+@app.post("/signals/reset")
+async def reset_signals_endpoint():
+    database.reset_all_signals()
+    for s in ROUTE_SIGNALS:
+        s["state"] = "RED"
+    await broadcast_to_clients({
+        "type": "signals_reset"
+    })
+    return {"status": "signals_reset"}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     connected_clients.add(websocket)
     try:
         while True:
-            await websocket.receive_text()
+            text = await websocket.receive_text()
+            try:
+                msg = json.loads(text)
+                if msg.get("type") == "driver_telemetry":
+                    await process_driver_telemetry(msg)
+            except Exception:
+                pass
     except Exception:
         pass
     finally:
