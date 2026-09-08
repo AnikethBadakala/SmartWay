@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SmartWay - Driver View</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; height: 100vh; flex-direction: column; }
+        #topbar { background-color: #333; color: white; padding: 10px; display: flex; justify-content: space-between; align-items: center; }
+        #map { flex: 1; }
+        .controls { padding: 10px; background: #f9f9f9; border-bottom: 1px solid #ccc; display: flex; gap: 10px; }
+        button { padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        .alert { color: red; font-weight: bold; }
+        
+        .tl-red { color: red; font-size: 20px; font-weight: bold; }
+        .tl-green { color: green; font-size: 20px; font-weight: bold; }
+        .tl-yellow { color: orange; font-size: 20px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="topbar">
+        <h2>🚑 SmartWay Emergency Routing</h2>
+        <div id="status">Status: Disconnected</div>
+    </div>
+    
+    <div class="controls">
+        <button onclick="startSim()">1. Start Simulation Server</button>
+        <button onclick="dispatchAmbulance()">2. Dispatch Ambulance</button>
+        <button onclick="stopSim()" style="background-color: #dc3545;">Stop Simulation</button>
+        <span id="gw-status" class="alert"></span>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Initialize map centered roughly on Hyderabad
+        const map = L.map('map').setView([17.43, 78.39], 14);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        let ws = new WebSocket("ws://localhost:8000/ws");
+        
+        let ambulanceMarker = null;
+        let tlsMarkers = {}; // traffic light markers
+        
+        const ambIcon = L.icon({
+            iconUrl: 'https://cdn-icons-png.flaticon.com/512/320/320114.png',
+            iconSize: [32, 32],
+            iconAnchor: [16, 16]
+        });
+
+        ws.onopen = function() {
+            document.getElementById("status").innerText = "Status: Connected";
+        };
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === "update") {
+                // Update Ambulance
+                if (data.ambulance) {
+                    if (!ambulanceMarker) {
+                        ambulanceMarker = L.marker([data.ambulance.lat, data.ambulance.lon], {icon: ambIcon}).addTo(map);
+                        map.setView([data.ambulance.lat, data.ambulance.lon], 16);
+                    } else {
+                        ambulanceMarker.setLatLng([data.ambulance.lat, data.ambulance.lon]);
+                    }
+                }
+                
+                // Update Green Wave Status
+                if (data.green_wave_active) {
+                    document.getElementById("gw-status").innerText = "GREEN WAVE ACTIVE: Preempting Signal " + data.green_wave_active;
+                } else {
+                    document.getElementById("gw-status").innerText = "";
+                }
+                
+                // Update Traffic Lights
+                // (This is highly simplified; TraCI returns state strings like 'GGggrrrr')
+                if (data.tls) {
+                    data.tls.forEach(tls => {
+                        // Very naive state parsing - check if 'G' or 'g' is in state
+                        let isGreen = tls.state.includes('G') || tls.state.includes('g');
+                        let color = isGreen ? 'green' : 'red';
+                        
+                        if (!tlsMarkers[tls.id]) {
+                            tlsMarkers[tls.id] = L.circleMarker([tls.lat, tls.lon], {
+                                radius: 8,
+                                fillColor: color,
+                                color: "#000",
+                                weight: 1,
+                                opacity: 1,
+                                fillOpacity: 0.8
+                            }).addTo(map);
+                        } else {
+                            tlsMarkers[tls.id].setStyle({fillColor: color});
+                        }
+                    });
+                }
+            }
+        };
+
+        ws.onclose = function() {
+            document.getElementById("status").innerText = "Status: Disconnected (Server Offline)";
+        };
+
+        // API Calls
+        async function startSim() {
+            try {
+                await fetch("http://localhost:8000/start_sim");
+                alert("Simulation started on server.");
+            } catch(e) {
+                alert("Error: " + e);
+            }
+        }
+        
+        async function stopSim() {
+            try {
+                await fetch("http://localhost:8000/stop_sim");
+                alert("Simulation stopped.");
+            } catch(e) {
+                alert("Error: " + e);
+            }
+        }
+        
+        async function dispatchAmbulance() {
+            // Note: edge IDs must match what's in hyderabad.net.xml.
+            // These are placeholder edge IDs. We will need real edge IDs from the map!
+            // For now, let's hardcode some placeholder values that we'll find later.
+            let startEdge = prompt("Enter Start Edge ID (leave blank for random):", "-12345");
+            let endEdge = prompt("Enter Destination Edge ID (leave blank for random):", "67890");
+            
+            try {
+                await fetch(`http://localhost:8000/dispatch?start_edge=${startEdge}&end_edge=${endEdge}`, { method: 'POST' });
+            } catch(e) {
+                alert("Error: " + e);
+            }
+        }
+    </script>
+</body>
+</html>
