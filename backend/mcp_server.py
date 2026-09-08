@@ -95,6 +95,16 @@ def get_mission_analytics() -> str:
         "average_distance_km": round((row["avg_distance_m"] or 0) / 1000, 2)
     }, indent=2)
 
+@mcp.tool()
+def get_fleet_analytics() -> str:
+    """Fetches real-time fleet operations metrics and recent trips from Supabase database."""
+    try:
+        import supabase_client
+        data = supabase_client.get_analytics()
+        return json.dumps(data, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
 if __name__ == "__main__":
     print("SmartWay MCP Server is starting via stdio transport...")
     mcp.run()
