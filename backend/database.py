@@ -119,8 +119,9 @@ def init_db():
         ]
         cursor.executemany("INSERT INTO incidents VALUES (?, ?, ?, ?, ?, ?, ?)", incidents)
 
-    # Seed Real Hyderabad Traffic Signals
+    # Seed Comprehensive Real Hyderabad Traffic Signals (59 Major Intersections)
     real_signals = [
+        # Hitec City & Madhapur Corridor
         ("sig_hyd_1", "Cyber Towers Junction", 17.4504, 78.3808, "RED", "Hitec City Corridor"),
         ("sig_hyd_2", "Mindspace Circle Junction", 17.4429, 78.3792, "RED", "Mindspace Corridor"),
         ("sig_hyd_3", "Bio-Diversity Park Junction", 17.4326, 78.3697, "RED", "Gachibowli Arterial"),
@@ -132,7 +133,59 @@ def init_db():
         ("sig_hyd_9", "Kondapur RTO Junction", 17.4695, 78.3582, "RED", "Kondapur Central"),
         ("sig_hyd_10", "Inorbit Mall Rotary", 17.4398, 78.3922, "RED", "Durgam Cheruvu West"),
         ("sig_hyd_11", "IKEA Rotary Junction", 17.4375, 78.3745, "RED", "Hitec City Phase 2"),
-        ("sig_hyd_12", "Wipro Circle Junction", 17.4241, 78.3458, "RED", "Financial District")
+        ("sig_hyd_12", "Wipro Circle Junction", 17.4241, 78.3458, "RED", "Financial District"),
+        ("sig_hyd_13", "Cyber Gateway Junction", 17.4475, 78.3775, "RED", "Hitec City Main Road"),
+        ("sig_hyd_14", "Shilparamam Junction", 17.4530, 78.3790, "RED", "Hitec City Central"),
+        ("sig_hyd_15", "HITEX Exhibition Junction", 17.4645, 78.3720, "RED", "HITEX Corridor"),
+        ("sig_hyd_16", "Hitec MMTS / COD Junction", 17.4580, 78.3735, "RED", "Hitec MMTS Corridor"),
+        ("sig_hyd_17", "Ayyappa Society 100ft Junction", 17.4535, 78.3885, "RED", "Madhapur North"),
+        ("sig_hyd_18", "Kavuri Hills Junction", 17.4420, 78.3980, "RED", "Madhapur East"),
+        ("sig_hyd_19", "Neerus Junction (Jubilee Entry)", 17.4385, 78.4045, "RED", "Jubilee Hills Road 36"),
+        ("sig_hyd_20", "Peddamma Gudi Junction (Rd 36)", 17.4350, 78.4020, "RED", "Road No. 36 Corridor"),
+        ("sig_hyd_21", "Cable Bridge East Ramp", 17.4362, 78.4085, "RED", "Cable Bridge Corridor"),
+        ("sig_hyd_22", "Raidurg Metro Terminal Circle", 17.4410, 78.3760, "RED", "Mindspace West"),
+        # Gachibowli & Financial District Corridor
+        ("sig_hyd_23", "Gachibowli Flyover Junction", 17.4380, 78.3580, "RED", "Old Mumbai Highway"),
+        ("sig_hyd_24", "IIIT Hyderabad Junction", 17.4435, 78.3490, "RED", "Gachibowli Tech Zone"),
+        ("sig_hyd_25", "DLF Cybercity Gate Junction", 17.4480, 78.3560, "RED", "Gachibowli North"),
+        ("sig_hyd_26", "Radisson Hitec City Junction", 17.4520, 78.3570, "RED", "Gachibowli Arterial"),
+        ("sig_hyd_27", "Microsoft / ISB Road Junction", 17.4190, 78.3420, "RED", "Financial District"),
+        ("sig_hyd_28", "Continental Hospital Circle", 17.4184, 78.3486, "RED", "Nanakramguda Corridor"),
+        ("sig_hyd_29", "Waverock / TSIIC Rotary", 17.4140, 78.3420, "RED", "Financial District South"),
+        ("sig_hyd_30", "Nanakramguda Rotary", 17.4200, 78.3600, "RED", "ORR Service Road"),
+        ("sig_hyd_31", "Gowlidoddy Junction", 17.4210, 78.3340, "RED", "Financial District West"),
+        # Kondapur, Hafeezpet & Miyapur Corridor
+        ("sig_hyd_32", "Botanical Garden Junction", 17.4580, 78.3630, "RED", "Botanical Garden Road"),
+        ("sig_hyd_33", "Whitefields Junction", 17.4630, 78.3610, "RED", "Kondapur Link"),
+        ("sig_hyd_34", "Kondapur Masjid Banda Junction", 17.4660, 78.3540, "RED", "Kondapur Central"),
+        ("sig_hyd_35", "Chirec International Junction", 17.4630, 78.3510, "RED", "Kondapur Arterial"),
+        ("sig_hyd_36", "Hafeezpet Flyover Junction", 17.4810, 78.3520, "RED", "Hafeezpet Arterial"),
+        ("sig_hyd_37", "Allwyn X Roads (Miyapur Link)", 17.4930, 78.3480, "RED", "Miyapur Corridor"),
+        ("sig_hyd_38", "Miyapur Metro Station Junction", 17.4965, 78.3600, "RED", "Miyapur Metro Corridor"),
+        # Jubilee Hills & Banjara Hills Corridor
+        ("sig_hyd_39", "Road No. 10 / Cancer Hospital Junction", 17.4245, 78.4230, "RED", "Jubilee Hills South"),
+        ("sig_hyd_40", "KBR Park Main Gate Junction", 17.4255, 78.4290, "RED", "Banjara-Jubilee Link"),
+        ("sig_hyd_41", "Sagar Society Junction (Rd 2)", 17.4270, 78.4350, "RED", "Banjara Hills Rd 2"),
+        ("sig_hyd_42", "NFCL Circle / Panjagutta", 17.4260, 78.4505, "RED", "Panjagutta Arterial"),
+        ("sig_hyd_43", "Taj Krishna Circle (Rd 1)", 17.4170, 78.4480, "RED", "Banjara Hills Rd 1"),
+        ("sig_hyd_44", "Care Hospital Junction (Rd 10)", 17.4190, 78.4430, "RED", "Banjara Hills Rd 10"),
+        ("sig_hyd_45", "Masab Tank / Pension Office Junction", 17.4040, 78.4520, "RED", "Masab Tank Corridor"),
+        # Kukatpally & Ameerpet Corridor
+        ("sig_hyd_46", "JNTU X Roads Junction", 17.4980, 78.3880, "RED", "Kukatpally Highway"),
+        ("sig_hyd_47", "KPHB Colony Metro Junction", 17.4920, 78.3990, "RED", "KPHB Corridor"),
+        ("sig_hyd_48", "Forum Sujana Mall Junction", 17.4860, 78.3880, "RED", "KPHB Phase 9 Link"),
+        ("sig_hyd_49", "Malaysian Township Circle", 17.4820, 78.3920, "RED", "KPHB Arterial"),
+        ("sig_hyd_50", "Moosapet Y Junction", 17.4690, 78.4310, "RED", "Moosapet Corridor"),
+        ("sig_hyd_51", "Bharat Nagar Metro Junction", 17.4620, 78.4380, "RED", "NH65 Corridor"),
+        ("sig_hyd_52", "Erragadda X Roads", 17.4550, 78.4420, "RED", "NH65 Corridor"),
+        ("sig_hyd_53", "SR Nagar X Roads", 17.4440, 78.4450, "RED", "Ameerpet Highway"),
+        ("sig_hyd_54", "Ameerpet Metro Central Junction", 17.4370, 78.4480, "RED", "Ameerpet Metro Hub"),
+        # Shaikpet & Tolichowki Corridor
+        ("sig_hyd_55", "Shaikpet Flyover / Dargah Junction", 17.4120, 78.3910, "RED", "Tolichowki-Gachibowli Link"),
+        ("sig_hyd_56", "Tolichowki X Roads Junction", 17.4010, 78.4110, "RED", "Tolichowki Arterial"),
+        ("sig_hyd_57", "Rethi Bowli Junction", 17.3940, 78.4280, "RED", "Mehdipatnam Link"),
+        ("sig_hyd_58", "Mehdipatnam Ring Road Junction", 17.3910, 78.4410, "RED", "Mehdipatnam Arterial"),
+        ("sig_hyd_59", "Attapur Pillar 143 Junction", 17.3780, 78.4350, "RED", "PVNR Expressway Link")
     ]
     for sig in real_signals:
         cursor.execute("""

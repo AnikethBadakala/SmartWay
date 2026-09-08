@@ -190,6 +190,74 @@ const DEFAULT_HOSPITALS = [
   }
 ];
 
+const DEFAULT_SIGNALS = [
+  // Hitec City & Madhapur Corridor
+  { id: "sig_hyd_1", name: "Cyber Towers Junction", lat: 17.4504, lon: 78.3808, state: "RED", corridor: "Hitec City Corridor" },
+  { id: "sig_hyd_2", name: "Mindspace Circle Junction", lat: 17.4429, lon: 78.3792, state: "RED", corridor: "Mindspace Corridor" },
+  { id: "sig_hyd_3", name: "Bio-Diversity Park Junction", lat: 17.4326, lon: 78.3697, state: "RED", corridor: "Gachibowli Arterial" },
+  { id: "sig_hyd_4", name: "Gachibowli 'T' Junction", lat: 17.4401, lon: 78.3489, state: "RED", corridor: "Outer Ring Road Link" },
+  { id: "sig_hyd_5", name: "Jubilee Hills Checkpost", lat: 17.4328, lon: 78.4116, state: "RED", corridor: "Road No. 36 Corridor" },
+  { id: "sig_hyd_6", name: "Road No. 45 / Durgam Link", lat: 17.4362, lon: 78.4061, state: "RED", corridor: "Cable Bridge Corridor" },
+  { id: "sig_hyd_7", name: "Madhapur Police Station Junction", lat: 17.4485, lon: 78.3908, state: "RED", corridor: "Madhapur Arterial" },
+  { id: "sig_hyd_8", name: "Kothaguda Junction", lat: 17.4608, lon: 78.3639, state: "RED", corridor: "Botanical Garden Road" },
+  { id: "sig_hyd_9", name: "Kondapur RTO Junction", lat: 17.4695, lon: 78.3582, state: "RED", corridor: "Kondapur Central" },
+  { id: "sig_hyd_10", name: "Inorbit Mall Rotary", lat: 17.4398, lon: 78.3922, state: "RED", corridor: "Durgam Cheruvu West" },
+  { id: "sig_hyd_11", name: "IKEA Rotary Junction", lat: 17.4375, lon: 78.3745, state: "RED", corridor: "Hitec City Phase 2" },
+  { id: "sig_hyd_12", name: "Wipro Circle Junction", lat: 17.4241, lon: 78.3458, state: "RED", corridor: "Financial District" },
+  { id: "sig_hyd_13", name: "Cyber Gateway Junction", lat: 17.4475, lon: 78.3775, state: "RED", corridor: "Hitec City Main Road" },
+  { id: "sig_hyd_14", name: "Shilparamam Junction", lat: 17.4530, lon: 78.3790, state: "RED", corridor: "Hitec City Central" },
+  { id: "sig_hyd_15", "name": "HITEX Exhibition Junction", lat: 17.4645, lon: 78.3720, state: "RED", corridor: "HITEX Corridor" },
+  { id: "sig_hyd_16", name: "Hitec MMTS / COD Junction", lat: 17.4580, lon: 78.3735, state: "RED", corridor: "Hitec MMTS Corridor" },
+  { id: "sig_hyd_17", name: "Ayyappa Society 100ft Junction", lat: 17.4535, lon: 78.3885, state: "RED", corridor: "Madhapur North" },
+  { id: "sig_hyd_18", name: "Kavuri Hills Junction", lat: 17.4420, lon: 78.3980, state: "RED", corridor: "Madhapur East" },
+  { id: "sig_hyd_19", name: "Neerus Junction (Jubilee Entry)", lat: 17.4385, lon: 78.4045, state: "RED", corridor: "Jubilee Hills Road 36" },
+  { id: "sig_hyd_20", name: "Peddamma Gudi Junction (Rd 36)", lat: 17.4350, lon: 78.4020, state: "RED", corridor: "Road No. 36 Corridor" },
+  { id: "sig_hyd_21", name: "Cable Bridge East Ramp", lat: 17.4362, lon: 78.4085, state: "RED", corridor: "Cable Bridge Corridor" },
+  { id: "sig_hyd_22", name: "Raidurg Metro Terminal Circle", lat: 17.4410, lon: 78.3760, state: "RED", corridor: "Mindspace West" },
+  // Gachibowli & Financial District Corridor
+  { id: "sig_hyd_23", name: "Gachibowli Flyover Junction", lat: 17.4380, lon: 78.3580, state: "RED", corridor: "Old Mumbai Highway" },
+  { id: "sig_hyd_24", name: "IIIT Hyderabad Junction", lat: 17.4435, lon: 78.3490, state: "RED", corridor: "Gachibowli Tech Zone" },
+  { id: "sig_hyd_25", name: "DLF Cybercity Gate Junction", lat: 17.4480, lon: 78.3560, state: "RED", corridor: "Gachibowli North" },
+  { id: "sig_hyd_26", name: "Radisson Hitec City Junction", lat: 17.4520, lon: 78.3570, state: "RED", corridor: "Gachibowli Arterial" },
+  { id: "sig_hyd_27", name: "Microsoft / ISB Road Junction", lat: 17.4190, lon: 78.3420, state: "RED", corridor: "Financial District" },
+  { id: "sig_hyd_28", name: "Continental Hospital Circle", lat: 17.4184, lon: 78.3486, state: "RED", corridor: "Nanakramguda Corridor" },
+  { id: "sig_hyd_29", name: "Waverock / TSIIC Rotary", lat: 17.4140, lon: 78.3420, state: "RED", corridor: "Financial District South" },
+  { id: "sig_hyd_30", name: "Nanakramguda Rotary", lat: 17.4200, lon: 78.3600, state: "RED", corridor: "ORR Service Road" },
+  { id: "sig_hyd_31", name: "Gowlidoddy Junction", lat: 17.4210, lon: 78.3340, state: "RED", corridor: "Financial District West" },
+  // Kondapur, Hafeezpet & Miyapur Corridor
+  { id: "sig_hyd_32", name: "Botanical Garden Junction", lat: 17.4580, lon: 78.3630, state: "RED", corridor: "Botanical Garden Road" },
+  { id: "sig_hyd_33", name: "Whitefields Junction", lat: 17.4630, lon: 78.3610, state: "RED", corridor: "Kondapur Link" },
+  { id: "sig_hyd_34", name: "Kondapur Masjid Banda Junction", lat: 17.4660, lon: 78.3540, state: "RED", corridor: "Kondapur Central" },
+  { id: "sig_hyd_35", name: "Chirec International Junction", lat: 17.4630, lon: 78.3510, state: "RED", corridor: "Kondapur Arterial" },
+  { id: "sig_hyd_36", name: "Hafeezpet Flyover Junction", lat: 17.4810, lon: 78.3520, state: "RED", corridor: "Hafeezpet Arterial" },
+  { id: "sig_hyd_37", name: "Allwyn X Roads (Miyapur Link)", lat: 17.4930, lon: 78.3480, state: "RED", corridor: "Miyapur Corridor" },
+  { id: "sig_hyd_38", name: "Miyapur Metro Station Junction", lat: 17.4965, lon: 78.3600, state: "RED", corridor: "Miyapur Metro Corridor" },
+  // Jubilee Hills & Banjara Hills Corridor
+  { id: "sig_hyd_39", name: "Road No. 10 / Cancer Hospital Junction", lat: 17.4245, lon: 78.4230, state: "RED", corridor: "Jubilee Hills South" },
+  { id: "sig_hyd_40", name: "KBR Park Main Gate Junction", lat: 17.4255, lon: 78.4290, state: "RED", corridor: "Banjara-Jubilee Link" },
+  { id: "sig_hyd_41", name: "Sagar Society Junction (Rd 2)", lat: 17.4270, lon: 78.4350, state: "RED", corridor: "Banjara Hills Rd 2" },
+  { id: "sig_hyd_42", name: "NFCL Circle / Panjagutta", lat: 17.4260, lon: 78.4505, state: "RED", corridor: "Panjagutta Arterial" },
+  { id: "sig_hyd_43", name: "Taj Krishna Circle (Rd 1)", lat: 17.4170, lon: 78.4480, state: "RED", corridor: "Banjara Hills Rd 1" },
+  { id: "sig_hyd_44", name: "Care Hospital Junction (Rd 10)", lat: 17.4190, lon: 78.4430, state: "RED", corridor: "Banjara Hills Rd 10" },
+  { id: "sig_hyd_45", name: "Masab Tank / Pension Office Junction", lat: 17.4040, lon: 78.4520, state: "RED", corridor: "Masab Tank Corridor" },
+  // Kukatpally & Ameerpet Corridor
+  { id: "sig_hyd_46", name: "JNTU X Roads Junction", lat: 17.4980, lon: 78.3880, state: "RED", corridor: "Kukatpally Highway" },
+  { id: "sig_hyd_47", name: "KPHB Colony Metro Junction", lat: 17.4920, lon: 78.3990, state: "RED", corridor: "KPHB Corridor" },
+  { id: "sig_hyd_48", name: "Forum Sujana Mall Junction", lat: 17.4860, lon: 78.3880, state: "RED", corridor: "KPHB Phase 9 Link" },
+  { id: "sig_hyd_49", name: "Malaysian Township Circle", lat: 17.4820, lon: 78.3920, state: "RED", corridor: "KPHB Arterial" },
+  { id: "sig_hyd_50", name: "Moosapet Y Junction", lat: 17.4690, lon: 78.4310, state: "RED", corridor: "Moosapet Corridor" },
+  { id: "sig_hyd_51", name: "Bharat Nagar Metro Junction", lat: 17.4620, lon: 78.4380, state: "RED", corridor: "NH65 Corridor" },
+  { id: "sig_hyd_52", name: "Erragadda X Roads", lat: 17.4550, lon: 78.4420, state: "RED", corridor: "NH65 Corridor" },
+  { id: "sig_hyd_53", name: "SR Nagar X Roads", lat: 17.4440, lon: 78.4450, state: "RED", corridor: "Ameerpet Highway" },
+  { id: "sig_hyd_54", name: "Ameerpet Metro Central Junction", lat: 17.4370, lon: 78.4480, state: "RED", corridor: "Ameerpet Metro Hub" },
+  // Shaikpet & Tolichowki Corridor
+  { id: "sig_hyd_55", name: "Shaikpet Flyover / Dargah Junction", lat: 17.4120, lon: 78.3910, state: "RED", corridor: "Tolichowki-Gachibowli Link" },
+  { id: "sig_hyd_56", name: "Tolichowki X Roads Junction", lat: 17.4010, lon: 78.4110, state: "RED", corridor: "Tolichowki Arterial" },
+  { id: "sig_hyd_57", name: "Rethi Bowli Junction", lat: 17.3940, lon: 78.4280, state: "RED", corridor: "Mehdipatnam Link" },
+  { id: "sig_hyd_58", name: "Mehdipatnam Ring Road Junction", lat: 17.3910, lon: 78.4410, state: "RED", corridor: "Mehdipatnam Arterial" },
+  { id: "sig_hyd_59", name: "Attapur Pillar 143 Junction", lat: 17.3780, lon: 78.4350, state: "RED", corridor: "PVNR Expressway Link" }
+];
+
 export default function HomeScreen() {
   const [backendHost, setBackendHost] = useState<string>(DEFAULT_HOST);
   const [hostModalVisible, setHostModalVisible] = useState<boolean>(false);
@@ -237,7 +305,7 @@ export default function HomeScreen() {
   const [routeStats, setRouteStats] = useState<any>(null);
 
   // Traffic signals & Upcoming Signal HUD
-  const [tlsList, setTlsList] = useState<any[]>([]);
+  const [tlsList, setTlsList] = useState<any[]>(DEFAULT_SIGNALS);
   const [upcomingSignals, setUpcomingSignals] = useState<any[]>([]);
   const [greenWaveActive, setGreenWaveActive] = useState<string | null>(null);
 
@@ -345,7 +413,7 @@ export default function HomeScreen() {
     setOptimalRoute([]);
     setAltRoute1([]);
     setAltRoute2([]);
-    setTlsList([]);
+    setTlsList(DEFAULT_SIGNALS.map(s => ({ ...s, state: 'RED' })));
     setUpcomingSignals([]);
     setGreenWaveActive(null);
     setCongestionAlert(null);
@@ -373,6 +441,16 @@ export default function HomeScreen() {
       if (hospRes.ok) {
         const hospData = await hospRes.json();
         if (hospData.hospitals?.length > 0) setHospitals(hospData.hospitals);
+      }
+    } catch (e) {}
+
+    try {
+      const sigRes = await fetch(`${API_URL}/signals/hyderabad`);
+      if (sigRes.ok) {
+        const sigData = await sigRes.json();
+        if (sigData.signals?.length > 0) {
+          setTlsList(sigData.signals);
+        }
       }
     } catch (e) {}
 
@@ -560,6 +638,23 @@ export default function HomeScreen() {
 
               // Stream telemetry to backend if active dispatch
               if (isDispatched) {
+                // Real-time responsive calculation of nearest signals
+                if (tlsList.length > 0) {
+                  const curLat = loc.coords.latitude;
+                  const curLon = loc.coords.longitude;
+                  const withDist = tlsList.map(s => {
+                    const distM = calculateHaversineDistance(curLat, curLon, s.lat, s.lon) * 1000;
+                    return { ...s, distance_m: Math.round(distM) };
+                  }).sort((a, b) => a.distance_m - b.distance_m);
+
+                  setUpcomingSignals(withDist.slice(0, 3).map(s => ({
+                    name: s.name,
+                    state: s.distance_m <= 250 ? 'GREEN' : s.state,
+                    distance_m: s.distance_m,
+                    status_text: `${s.distance_m <= 250 ? 'GREEN' : s.state} • ${s.distance_m}m away`
+                  })));
+                }
+
                 try {
                   const res = await fetch(`${API_URL}/driver/telemetry`, {
                     method: 'POST',
@@ -582,6 +677,15 @@ export default function HomeScreen() {
                     if (telRes.green_wave_active && telRes.green_wave_active !== lastSpokenSignal) {
                       setLastSpokenSignal(telRes.green_wave_active);
                       speakAlert(`Green wave clear at ${telRes.green_wave_active}`);
+                    }
+                    if (telRes.upcoming_signals && telRes.upcoming_signals.length > 0) {
+                      setUpcomingSignals(telRes.upcoming_signals);
+                    }
+                    if (telRes.time_saved !== undefined) {
+                      setTimeSaved(telRes.time_saved);
+                    }
+                    if (telRes.bypassed !== undefined) {
+                      setBypassedCount(telRes.bypassed);
                     }
                   }
                 } catch (err) {
