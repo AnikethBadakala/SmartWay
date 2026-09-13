@@ -284,9 +284,9 @@ Use the convenient pre-fill chips on the login modal or enter the credentials be
 
 | Role | Username | Password | Notes |
 | :--- | :--- | :--- | :--- |
-| **Driver 1** | `driver1` | `123` | Assigned to `AMB-108 Rapid Response` |
-| **Driver 2** | `driver2` | `123` | Assigned to `AMB-102 Trauma Unit` |
-| **Administrator** | `admin` | `admin` | HQ Command Center Fleet Observer |
+| **Driver 1** | `driver1` | `` | Assigned to `AMB-108 Rapid Response` |
+| **Driver 2** | `driver2` | `` | Assigned to `AMB-102 Trauma Unit` |
+| **Administrator** | `admin` | `` | HQ Command Center Fleet Observer |
 
 ---
 
