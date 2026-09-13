@@ -460,9 +460,19 @@ async def get_hospitals():
 async def get_incidents():
     return {"incidents": database.get_all_incidents()}
 
+def check_real_driver_freshness():
+    global REAL_DRIVER_STATE, CURRENT_DISPATCH_INFO
+    if REAL_DRIVER_STATE.get("active", False):
+        # Auto-expire if no telemetry received for over 15 seconds (e.g. app closed/backgrounded)
+        if time.time() - REAL_DRIVER_STATE.get("last_update", 0) > 15:
+            REAL_DRIVER_STATE["active"] = False
+            REAL_DRIVER_STATE["speed"] = 0.0
+            REAL_DRIVER_STATE["mission_id"] = None
+
 @app.get("/status")
 async def get_status():
     global SIMULATION_RUNNING, AMBULANCE_IN_TRANSIT, SESSION_ACTIVE, REAL_DRIVER_STATE
+    check_real_driver_freshness()
     is_active = SESSION_ACTIVE or AMBULANCE_IN_TRANSIT or REAL_DRIVER_STATE["active"]
     return {
         "running": is_active,
@@ -474,6 +484,7 @@ async def get_status():
 @app.get("/fleet")
 async def get_active_fleet():
     global CURRENT_DISPATCH_INFO, AMBULANCE_IN_TRANSIT, REAL_DRIVER_STATE
+    check_real_driver_freshness()
     is_live = AMBULANCE_IN_TRANSIT or REAL_DRIVER_STATE["active"]
     amb1_lat = REAL_DRIVER_STATE["lat"] if REAL_DRIVER_STATE["active"] else 17.4485
     amb1_lon = REAL_DRIVER_STATE["lon"] if REAL_DRIVER_STATE["active"] else 78.3908
@@ -570,9 +581,12 @@ async def start_sim(is_user_request: bool = True):
 @app.get("/stop_sim")
 async def stop_sim():
     """Resets the active mission without killing the warm SUMO process, ensuring zero cold-start delay on next dispatch"""
-    global SIMULATION_RUNNING, AMBULANCE_IN_TRANSIT, SESSION_ACTIVE, ROUTE_SIGNALS, CURRENT_DISPATCH_INFO
+    global SIMULATION_RUNNING, AMBULANCE_IN_TRANSIT, SESSION_ACTIVE, ROUTE_SIGNALS, CURRENT_DISPATCH_INFO, REAL_DRIVER_STATE
     SESSION_ACTIVE = False
     AMBULANCE_IN_TRANSIT = False
+    REAL_DRIVER_STATE["active"] = False
+    REAL_DRIVER_STATE["speed"] = 0.0
+    REAL_DRIVER_STATE["mission_id"] = None
     ROUTE_SIGNALS = []
     CURRENT_DISPATCH_INFO = {
         "optimal_route": [],
@@ -613,6 +627,28 @@ async def stop_sim():
             pass
 
     return {"status": "Simulation stopped"}
+
+@app.post("/driver/offline")
+@app.get("/driver/offline")
+@app.post("/driver/stop")
+@app.get("/driver/stop")
+async def driver_offline(payload: dict = None):
+    """Explicitly marks real driver offline and notifies all admin screens immediately"""
+    global REAL_DRIVER_STATE, CURRENT_DISPATCH_INFO, AMBULANCE_IN_TRANSIT, SESSION_ACTIVE
+    REAL_DRIVER_STATE["active"] = False
+    REAL_DRIVER_STATE["speed"] = 0.0
+    REAL_DRIVER_STATE["mission_id"] = None
+    AMBULANCE_IN_TRANSIT = False
+    SESSION_ACTIVE = False
+
+    offline_msg = {
+        "type": "driver_offline",
+        "driver_id": REAL_DRIVER_STATE.get("driver_id", "driver1"),
+        "vehicle_id": REAL_DRIVER_STATE.get("vehicle_id", "AMB-108"),
+        "status": "STANDBY"
+    }
+    await broadcast_to_clients(offline_msg)
+    return {"status": "driver_offline", "message": "Driver marked offline and standby"}
 
 @app.post("/dispatch")
 async def dispatch_ambulance(
@@ -1177,6 +1213,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg = json.loads(text)
                 if msg.get("type") == "driver_telemetry":
                     await process_driver_telemetry(msg)
+                elif msg.get("type") in ("driver_offline", "driver_stop"):
+                    await driver_offline()
             except Exception:
                 pass
     except Exception:

@@ -11,21 +11,14 @@ import {
   StatusBar,
   ActivityIndicator,
   TextInput,
-  ScrollView
+  ScrollView,
+  AppState
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
+import SmartMap from '../components/SmartMap';
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
-
-// Safe conditional WebView import for Android standalone builds (zero crashes on Web)
-let WebView: any = null;
-if (Platform.OS !== 'web') {
-  try {
-    WebView = require('react-native-webview').WebView;
-  } catch (e) {}
-}
 
 const RENDER_CLOUD_HOST = 'smartway-backend-ir79.onrender.com';
 
@@ -565,8 +558,12 @@ export default function HomeScreen() {
     }
   ]);
   const [selectedFleetId, setSelectedFleetId] = useState<string>("AMB-108");
+  const [isDriverDetailsExpanded, setIsDriverDetailsExpanded] = useState<boolean>(false);
+  const [isAdminInspectorExpanded, setIsAdminInspectorExpanded] = useState<boolean>(false);
+  const [adminInspectorTab, setAdminInspectorTab] = useState<'mission' | 'signals' | 'telemetry'>('mission');
 
   const mapRef = useRef<any>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const activeSelectedFleet = fleetList.find(f => f.id === selectedFleetId) || fleetList[0];
 
@@ -682,6 +679,7 @@ export default function HomeScreen() {
     const connectWS = () => {
       try {
         ws = new WebSocket(WS_URL);
+        wsRef.current = ws;
 
         ws.onopen = () => {
           setConnectionStatus("🟢 Live System Connected");
@@ -691,10 +689,11 @@ export default function HomeScreen() {
           try {
             const data = JSON.parse(e.data);
 
-            if (data.type === "reset") {
+            if (data.type === "reset" || data.type === "driver_offline") {
               resetAllState();
               setIsSimRunning(false);
               setIsDispatched(false);
+              refreshLocations();
               return;
             }
 
@@ -787,9 +786,28 @@ export default function HomeScreen() {
 
     return () => {
       if (ws) ws.close();
+      wsRef.current = null;
       if (reconnectTimer) clearTimeout(reconnectTimer);
     };
   }, [WS_URL, API_URL, backendHost]);
+
+  // Auto-notify server when driver app is closed or moved to background
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState.match(/inactive|background/) && currentUser?.role === 'driver') {
+        try {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'driver_offline' }));
+          }
+          fetch(`${API_URL}/driver/offline`, { method: 'POST' }).catch(() => {});
+        } catch (e) {}
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [currentUser, API_URL]);
 
   // Real-time GPS Location Tracking for iOS Mobile Driver in Hyderabad
   useEffect(() => {
@@ -984,6 +1002,14 @@ export default function HomeScreen() {
   };
 
   const handleLogout = () => {
+    if (currentUser?.role === 'driver') {
+      try {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'driver_offline' }));
+        }
+        fetch(`${API_URL}/driver/offline`, { method: 'POST' }).catch(() => {});
+      } catch (e) {}
+    }
     setCurrentUser(null);
     resetAllState();
     setModalVisible(false);
@@ -996,7 +1022,13 @@ export default function HomeScreen() {
       resetAllState();
       setModalVisible(false);
       try {
-        await fetch(`${API_URL}/stop_sim`);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'driver_offline' }));
+        }
+        await Promise.all([
+          fetch(`${API_URL}/stop_sim`),
+          fetch(`${API_URL}/driver/offline`, { method: 'POST' })
+        ]);
       } catch (e) {}
     } else {
       setIsSimRunning(true);
@@ -1626,379 +1658,299 @@ export default function HomeScreen() {
       ) : (
         <>
           {currentUser?.role === 'admin' ? (
-            <View style={styles.adminFleetPanel}>
-              {/* Active Fleet Selector Carousel */}
-              <View style={styles.adminFleetHeader}>
-                <Text style={styles.adminFleetHeaderTitle}>EMERGENCY FLEET UNITS</Text>
-                <Text style={styles.adminFleetHeaderCount}>
-                  {fleetList.filter(f => f.status === 'IN_TRANSIT').length} ACTIVE • {fleetList.length} UNITS
-                </Text>
+            <>
+              {/* Compact Floating Fleet Bar */}
+              <View style={styles.adminCompactFleetBar}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.compactFleetScroll}>
+                  {fleetList.map((amb) => {
+                    const isSelected = selectedFleetId === amb.id;
+                    const isLive = amb.status === 'IN_TRANSIT';
+                    return (
+                      <TouchableOpacity
+                        key={amb.id}
+                        style={[
+                          styles.compactFleetChip,
+                          isSelected && styles.compactFleetChipSelected,
+                          isLive && styles.compactFleetChipLive
+                        ]}
+                        onPress={() => setSelectedFleetId(amb.id)}
+                      >
+                        <Text style={styles.compactFleetChipIcon}>🚑</Text>
+                        <Text style={[styles.compactFleetChipName, isSelected && styles.compactFleetChipNameSelected]}>
+                          {amb.id}
+                        </Text>
+                        <View style={[styles.compactDot, isLive ? styles.dotLive : styles.dotStandby]} />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
               </View>
 
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.fleetScrollContent}>
-                {fleetList.map((amb) => {
-                  const isSelected = selectedFleetId === amb.id;
-                  const isLive = amb.status === 'IN_TRANSIT';
-                  return (
-                    <TouchableOpacity
-                      key={amb.id}
-                      style={[
-                        styles.fleetUnitCard,
-                        isSelected && styles.fleetUnitCardSelected,
-                        isLive && styles.fleetUnitCardLive
-                      ]}
-                      onPress={() => setSelectedFleetId(amb.id)}
-                    >
-                      <View style={styles.fleetUnitTopRow}>
-                        <Text style={styles.fleetUnitIcon}>🚑</Text>
-                        <View style={[styles.fleetUnitBadge, isLive ? styles.badgeLive : styles.badgeStandby]}>
-                          <Text style={[styles.fleetUnitBadgeText, isLive ? { color: '#34D399' } : { color: '#94A3B8' }]}>
-                            {isLive ? '🟢 LIVE' : '⚪ STANDBY'}
+              {/* Streamlined Admin Driver Inspector Sheet */}
+              {activeSelectedFleet && (
+                <View style={styles.adminInspectorSheet}>
+                  <View style={styles.inspectorHeaderRow}>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.inspectorUnitTitle}>{activeSelectedFleet.name}</Text>
+                        <View style={[
+                          styles.inspectorStatusPill, 
+                          activeSelectedFleet.status === 'IN_TRANSIT' ? styles.pillLive : styles.pillStandby
+                        ]}>
+                          <Text style={[
+                            styles.inspectorStatusPillText,
+                            activeSelectedFleet.status === 'IN_TRANSIT' ? { color: '#F87171' } : { color: '#94A3B8' }
+                          ]}>
+                            {activeSelectedFleet.status === 'IN_TRANSIT' ? '🟢 LIVE' : '⚪ STANDBY'}
                           </Text>
                         </View>
                       </View>
-                      <Text style={styles.fleetUnitName}>{amb.name}</Text>
-                      <Text style={styles.fleetUnitDriver}>👤 {amb.driver}</Text>
-                      {isLive ? (
-                        <Text style={styles.fleetUnitSpeed}>⚡ {ambulanceSpeed || amb.speed || 55} km/h</Text>
-                      ) : (
-                        <Text style={styles.fleetUnitStation}>📍 {amb.source}</Text>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-
-              {/* Selected Ambulance Mission & Route Inspector */}
-              {activeSelectedFleet && (
-                <View style={styles.adminInspectorCard}>
-                  <View style={styles.inspectorHeaderRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.inspectorUnitTitle}>
-                        {activeSelectedFleet.name} ({activeSelectedFleet.id})
-                      </Text>
-                      <Text style={styles.inspectorDriverName}>
-                        Operator: {activeSelectedFleet.driver}
-                      </Text>
+                      <Text style={styles.inspectorDriverName}>Operator: {activeSelectedFleet.driver}</Text>
                     </View>
-                    <View style={[
-                      styles.inspectorStatusPill, 
-                      activeSelectedFleet.status === 'IN_TRANSIT' ? styles.pillLive : styles.pillStandby
-                    ]}>
-                      <Text style={[
-                        styles.inspectorStatusPillText,
-                        activeSelectedFleet.status === 'IN_TRANSIT' ? { color: '#F87171' } : { color: '#94A3B8' }
-                      ]}>
-                        {activeSelectedFleet.status === 'IN_TRANSIT' ? '🚨 EMERGENCY DISPATCH' : '🅿️ STANDBY'}
-                      </Text>
+
+                    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                      {activeSelectedFleet.status === 'IN_TRANSIT' && (
+                        <>
+                          <TouchableOpacity style={styles.miniActionBtn} onPress={centerOnAmbulance}>
+                            <Text style={styles.miniActionBtnText}>🎯 Center</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={[styles.miniActionBtn, styles.miniActionBtnSecondary]} onPress={fitToFullRoute}>
+                            <Text style={styles.miniActionBtnSecondaryText}>🗺️ Route</Text>
+                          </TouchableOpacity>
+                        </>
+                      )}
+                      <TouchableOpacity
+                        style={styles.toggleDetailsBtn}
+                        onPress={() => setIsAdminInspectorExpanded(!isAdminInspectorExpanded)}
+                      >
+                        <Text style={styles.toggleDetailsBtnText}>
+                          {isAdminInspectorExpanded ? '▲ Hide' : '📊 Details ▾'}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
 
+                  {/* Quick Glance Summary */}
                   {activeSelectedFleet.status === 'IN_TRANSIT' ? (
-                    <>
-                      <View style={styles.inspectorRoutePath}>
-                        <View style={styles.pathPoint}>
-                          <Text style={styles.pathPointLabel}>📍 SOURCE / PICKUP</Text>
-                          <Text style={styles.pathPointName} numberOfLines={1}>
-                            {selectedIncident?.name || activeSelectedFleet.source || "Cyber Towers Junction"}
-                          </Text>
-                        </View>
-                        <Text style={styles.pathArrow}>➔</Text>
-                        <View style={styles.pathPoint}>
-                          <Text style={styles.pathPointLabel}>🏥 DESTINATION</Text>
-                          <Text style={styles.pathPointName} numberOfLines={1}>
-                            {selectedHospital?.name || activeSelectedFleet.destination || "Medicover Hospital"}
-                          </Text>
-                        </View>
+                    <View style={styles.inspectorQuickStrip}>
+                      <Text style={styles.quickStripText} numberOfLines={1}>
+                        📍 {selectedIncident?.name || activeSelectedFleet.source || "Pickup"} ➔ 🏥 {selectedHospital?.name || activeSelectedFleet.destination || "Hospital"}
+                      </Text>
+                      <View style={styles.quickMetricsRow}>
+                        <Text style={styles.quickMetricBadge}>⚡ {ambulanceSpeed || activeSelectedFleet.speed || 55} km/h</Text>
+                        <Text style={[styles.quickMetricBadge, { color: '#38BDF8', borderColor: 'rgba(56, 189, 248, 0.3)' }]}>⏱️ {timeSaved || activeSelectedFleet.time_saved_s || 0}s saved</Text>
+                        <Text style={[styles.quickMetricBadge, { color: '#10B981', borderColor: 'rgba(16, 185, 129, 0.3)' }]}>🚦 {bypassedCount || activeSelectedFleet.signals_cleared || 0} cleared</Text>
                       </View>
-
-                      <View style={styles.inspectorMetricsStrip}>
-                        <View style={styles.inspectorMetric}>
-                          <Text style={styles.inspectorMetricValue}>
-                            {ambulanceSpeed || activeSelectedFleet.speed || 55} km/h
-                          </Text>
-                          <Text style={styles.inspectorMetricLabel}>SPEED</Text>
-                        </View>
-                        <View style={styles.inspectorMetricDivider} />
-                        <View style={styles.inspectorMetric}>
-                          <Text style={[styles.inspectorMetricValue, { color: '#38BDF8' }]}>
-                            {timeSaved || activeSelectedFleet.time_saved_s || 0}s
-                          </Text>
-                          <Text style={styles.inspectorMetricLabel}>TIME SAVED</Text>
-                        </View>
-                        <View style={styles.inspectorMetricDivider} />
-                        <View style={styles.inspectorMetric}>
-                          <Text style={[styles.inspectorMetricValue, { color: '#10B981' }]}>
-                            {bypassedCount || activeSelectedFleet.signals_cleared || 0} 🚦
-                          </Text>
-                          <Text style={styles.inspectorMetricLabel}>CLEARED</Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.inspectorActionButtons}>
-                        <TouchableOpacity style={styles.actionBtn} onPress={centerOnAmbulance}>
-                          <Text style={styles.actionBtnText}>🎯 Center Ambulance</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.actionBtn, styles.actionBtnSecondary]} onPress={fitToFullRoute}>
-                          <Text style={styles.actionBtnSecondaryText}>🗺️ Fit Full Route</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </>
+                    </View>
                   ) : (
                     <View style={styles.standbyInfoBox}>
                       <Text style={styles.standbyInfoText}>
-                        Unit is stationed at {activeSelectedFleet.source}. Ready for driver dispatch.
+                        Stationed at {activeSelectedFleet.source}. Unit ready on standby.
                       </Text>
+                    </View>
+                  )}
+
+                  {/* Tabbed Inspector Deep Dive (Only when expanded) */}
+                  {isAdminInspectorExpanded && activeSelectedFleet.status === 'IN_TRANSIT' && (
+                    <View style={styles.inspectorTabsContainer}>
+                      <View style={styles.tabNavRow}>
+                        <TouchableOpacity
+                          style={[styles.tabButton, adminInspectorTab === 'mission' && styles.tabButtonActive]}
+                          onPress={() => setAdminInspectorTab('mission')}
+                        >
+                          <Text style={[styles.tabButtonText, adminInspectorTab === 'mission' && styles.tabButtonTextActive]}>
+                            🧭 Corridor
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.tabButton, adminInspectorTab === 'signals' && styles.tabButtonActive]}
+                          onPress={() => setAdminInspectorTab('signals')}
+                        >
+                          <Text style={[styles.tabButtonText, adminInspectorTab === 'signals' && styles.tabButtonTextActive]}>
+                            🚦 Signals ({tlsList.filter(s => s.state === 'GREEN').length})
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.tabButton, adminInspectorTab === 'telemetry' && styles.tabButtonActive]}
+                          onPress={() => setAdminInspectorTab('telemetry')}
+                        >
+                          <Text style={[styles.tabButtonText, adminInspectorTab === 'telemetry' && styles.tabButtonTextActive]}>
+                            📊 Telemetry
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {adminInspectorTab === 'mission' && (
+                        <View style={styles.tabContentCard}>
+                          <Text style={styles.tabSectionTitle}>Emergency Corridor Details</Text>
+                          <Text style={styles.tabDetailText}>📍 Pickup: <Text style={{ fontWeight: '700', color: '#F1F5F9' }}>{selectedIncident?.name || activeSelectedFleet.source}</Text></Text>
+                          <Text style={styles.tabDetailText}>🏥 Hospital: <Text style={{ fontWeight: '700', color: '#F1F5F9' }}>{selectedHospital?.name || activeSelectedFleet.destination}</Text></Text>
+                          <Text style={styles.tabDetailText}>🛣️ Route: <Text style={{ fontWeight: '700', color: '#38BDF8' }}>{routeStats ? `${routeStats.optimalKm} km (${routeStats.signals} signals)` : 'Optimized Corridor'}</Text></Text>
+                        </View>
+                      )}
+
+                      {adminInspectorTab === 'signals' && (
+                        <View style={styles.tabContentCard}>
+                          <Text style={styles.tabSectionTitle}>Traffic Preemption Status</Text>
+                          <Text style={styles.tabDetailText}>🟢 Green Wave: <Text style={{ fontWeight: '700', color: '#34D399' }}>{greenWaveActive || 'Preempting signals within 250m'}</Text></Text>
+                          <Text style={styles.tabDetailText}>🚦 Cleared: <Text style={{ fontWeight: '700', color: '#F1F5F9' }}>{bypassedCount || activeSelectedFleet.signals_cleared || 0} junctions</Text></Text>
+                          <Text style={styles.tabDetailText}>⏱️ Time Saved: <Text style={{ fontWeight: '700', color: '#38BDF8' }}>+{timeSaved || activeSelectedFleet.time_saved_s || 0}s saved</Text></Text>
+                        </View>
+                      )}
+
+                      {adminInspectorTab === 'telemetry' && (
+                        <View style={styles.tabContentCard}>
+                          <Text style={styles.tabSectionTitle}>Real-time Sensor Telemetry</Text>
+                          <Text style={styles.tabDetailText}>⚡ Speed: <Text style={{ fontWeight: '700', color: '#F59E0B' }}>{ambulanceSpeed || activeSelectedFleet.speed || 0} km/h</Text></Text>
+                          <Text style={styles.tabDetailText}>📍 Coords: <Text style={{ fontWeight: '700', color: '#F1F5F9' }}>{(ambulance?.latitude || activeSelectedFleet.lat || 17.448).toFixed(5)}, {(ambulance?.longitude || activeSelectedFleet.lon || 78.39).toFixed(5)}</Text></Text>
+                          <Text style={styles.tabDetailText}>📡 Channel: <Text style={{ fontWeight: '700', color: '#34D399' }}>Live Cloud Telemetry (WebSocket)</Text></Text>
+                        </View>
+                      )}
                     </View>
                   )}
                 </View>
               )}
-            </View>
+            </>
           ) : (
             <>
-              {/* Real-time Telemetry Dashboard */}
-              <View style={styles.dashboard}>
-                <View style={styles.statBox}>
-                  <Text style={styles.statLabel}>BYPASSED SIGNALS</Text>
-                  <Text style={[styles.statValue, { color: '#10B981' }]}>
-                    {bypassedCount} 🚦
-                  </Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statBox}>
-                  <Text style={styles.statLabel}>TIME SAVED</Text>
-                  <Text style={[styles.statValue, { color: '#3B82F6' }]}>
-                    {timeSaved}s
-                  </Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statBox}>
-                  <Text style={styles.statLabel}>AMBULANCE SPEED</Text>
-                  <Text style={[styles.statValue, { color: '#EF4444' }]}>
-                    {ambulanceSpeed} km/h
-                  </Text>
-                </View>
-              </View>
-
-              {/* Dynamic Signal Visibility HUD */}
-              {isDispatched && upcomingSignals.length > 0 && (
-                <View style={styles.upcomingHudBar}>
-                  <Text style={styles.hudLabel}>UPCOMING SIGNALS:</Text>
-                  {upcomingSignals.map((sig, idx) => {
-                    const isGreen = sig.state === "GREEN";
-                    return (
-                      <View
-                        key={`hud_${idx}`}
-                        style={[
-                          styles.hudChip,
-                          isGreen ? styles.hudChipGreen : styles.hudChipRed,
-                        ]}
-                      >
-                        <Text style={styles.hudChipText}>
-                          {isGreen ? "🟢" : "🔴"} {sig.name}:{" "}
-                          <Text style={{ fontWeight: '800' }}>
-                            {isGreen ? "GREEN (Wave Clear)" : `RED (${sig.distance_m}m)`}
-                          </Text>
-                        </Text>
+              {/* Streamlined Driver HUD */}
+              {isDispatched && (
+                <View style={styles.driverHUDOverlay}>
+                  {/* Glanceable Top Navigation Pill */}
+                  <View style={styles.driverGlanceCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.driverGlanceDestination} numberOfLines={1}>
+                        🏥 {selectedHospital?.name || "Destination Hospital"}
+                      </Text>
+                      <View style={styles.driverGlanceSubRow}>
+                        <Text style={styles.driverGlanceSpeed}>⚡ {ambulanceSpeed} km/h</Text>
+                        <Text style={styles.driverGlanceSaved}>⏱️ {timeSaved}s saved</Text>
+                        <Text style={styles.driverGlanceSignals}>🚦 {bypassedCount} cleared</Text>
                       </View>
-                    );
-                  })}
-                </View>
-              )}
-
-              {/* Green Wave Preemption Alert */}
-              {greenWaveActive && (
-                <View style={styles.alertBanner}>
-                  <Text style={styles.alertText}>
-                    🟢 GREEN WAVE ENGAGED — {greenWaveActive} TURNED GREEN (200m)
-                  </Text>
-                </View>
-              )}
-
-              {/* Dynamic Traffic Congestion Warning & Reroute Prompt */}
-              {congestionAlert && (
-                <View style={styles.congestionWarningCard}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.congestionTitle}>
-                      ⚠️ {congestionAlert.road_name}
-                    </Text>
-                    <Text style={styles.congestionSub}>
-                      Heavy gridlock detected ahead (+{congestionAlert.delay_minutes} min delay).
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.rerouteActionButton}
-                    onPress={handleApplyReroute}
-                  >
-                    <Text style={styles.rerouteActionButtonText}>⚡ Reroute Now (-6.2m)</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Google Maps-Style Route Selection Bar */}
-              {isDispatched && routeStats && (
-                <View style={styles.googleRouteBar}>
-                  <View style={[styles.routeCard, styles.routeCardSelected]}>
-                    <Text style={styles.routeTag}>FASTEST (GREEN WAVE)</Text>
-                    <Text style={styles.routeMainText}>🔵 {routeStats.optimalKm} km</Text>
-                    <Text style={styles.routeSubText}>Direct • {routeStats.signals} Signals</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.driverDetailsToggleBtn}
+                      onPress={() => setIsDriverDetailsExpanded(!isDriverDetailsExpanded)}
+                    >
+                      <Text style={styles.driverDetailsToggleText}>
+                        {isDriverDetailsExpanded ? '▲ Hide' : '📊 Details ▾'}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
 
-                  <View style={styles.routeCard}>
-                    <Text style={[styles.routeTag, { color: '#94A3B8' }]}>ALT 1 (INORBIT)</Text>
-                    <Text style={[styles.routeMainText, { color: '#CBD5E1' }]}>⚪ {routeStats.alt1Km} km</Text>
-                    <Text style={styles.routeSubText}>+12 min • Traffic</Text>
-                  </View>
+                  {/* Single Next Upcoming Signal Pill (Minimal & Glanceable) */}
+                  {upcomingSignals.length > 0 && (
+                    <View style={[
+                      styles.driverNextSignalPill,
+                      upcomingSignals[0].state === 'GREEN' ? styles.signalPillGreen : styles.signalPillRed
+                    ]}>
+                      <Text style={styles.driverNextSignalText} numberOfLines={1}>
+                        {upcomingSignals[0].state === 'GREEN' ? '🟢' : '🔴'} Next: <Text style={{ fontWeight: '800' }}>{upcomingSignals[0].name}</Text> • {upcomingSignals[0].state === 'GREEN' ? 'GREEN WAVE (Clear)' : `${upcomingSignals[0].distance_m}m away`}
+                      </Text>
+                    </View>
+                  )}
 
-                  <View style={styles.routeCard}>
-                    <Text style={[styles.routeTag, { color: '#F87171' }]}>ALT 2 (CHECKPOST)</Text>
-                    <Text style={[styles.routeMainText, { color: '#FCA5A5' }]}>🔴 {routeStats.alt2Km} km</Text>
-                    <Text style={styles.routeSubText}>+6 min • Congested</Text>
-                  </View>
+                  {/* Green Wave Preemption Alert Toast */}
+                  {greenWaveActive && (
+                    <View style={styles.floatingAlertBanner}>
+                      <Text style={styles.floatingAlertText}>
+                        🟢 GREEN WAVE ENGAGED — {greenWaveActive} (250m)
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Congestion Warning with Reroute Button */}
+                  {congestionAlert && (
+                    <View style={styles.congestionFloatingCard}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.congestionTitle}>⚠️ {congestionAlert.road_name}</Text>
+                        <Text style={styles.congestionSub}>Traffic bottleneck (+{congestionAlert.delay_minutes}m)</Text>
+                      </View>
+                      <TouchableOpacity style={styles.rerouteActionButton} onPress={handleApplyReroute}>
+                        <Text style={styles.rerouteActionButtonText}>⚡ Reroute</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {/* Expanded Mission Drawer (Only when driver taps Details) */}
+                  {isDriverDetailsExpanded && (
+                    <ScrollView style={styles.driverExpandedDrawer} contentContainerStyle={{ paddingBottom: 10 }}>
+                      <View style={styles.dashboard}>
+                        <View style={styles.statBox}>
+                          <Text style={styles.statLabel}>BYPASSED SIGNALS</Text>
+                          <Text style={[styles.statValue, { color: '#10B981' }]}>{bypassedCount} 🚦</Text>
+                        </View>
+                        <View style={styles.statDivider} />
+                        <View style={styles.statBox}>
+                          <Text style={styles.statLabel}>TIME SAVED</Text>
+                          <Text style={[styles.statValue, { color: '#3B82F6' }]}>{timeSaved}s</Text>
+                        </View>
+                        <View style={styles.statDivider} />
+                        <View style={styles.statBox}>
+                          <Text style={styles.statLabel}>AMBULANCE SPEED</Text>
+                          <Text style={[styles.statValue, { color: '#EF4444' }]}>{ambulanceSpeed} km/h</Text>
+                        </View>
+                      </View>
+
+                      {upcomingSignals.length > 1 && (
+                        <View style={styles.upcomingHudBar}>
+                          <Text style={styles.hudLabel}>CORRIDOR SIGNALS:</Text>
+                          {upcomingSignals.map((sig, idx) => {
+                            const isGreen = sig.state === "GREEN";
+                            return (
+                              <View key={`hud_${idx}`} style={[styles.hudChip, isGreen ? styles.hudChipGreen : styles.hudChipRed]}>
+                                <Text style={styles.hudChipText}>
+                                  {isGreen ? "🟢" : "🔴"} {sig.name}: <Text style={{ fontWeight: '800' }}>{isGreen ? "GREEN WAVE" : `${sig.distance_m}m`}</Text>
+                                </Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+
+                      {routeStats && (
+                        <View style={styles.googleRouteBar}>
+                          <View style={[styles.routeCard, styles.routeCardSelected]}>
+                            <Text style={styles.routeTag}>FASTEST (GREEN WAVE)</Text>
+                            <Text style={styles.routeMainText}>🔵 {routeStats.optimalKm} km</Text>
+                            <Text style={styles.routeSubText}>Direct • {routeStats.signals} Signals</Text>
+                          </View>
+                          <View style={styles.routeCard}>
+                            <Text style={[styles.routeTag, { color: '#94A3B8' }]}>ALT 1 (INORBIT)</Text>
+                            <Text style={[styles.routeMainText, { color: '#CBD5E1' }]}>⚪ {routeStats.alt1Km} km</Text>
+                            <Text style={styles.routeSubText}>+12 min • Traffic</Text>
+                          </View>
+                          <View style={styles.routeCard}>
+                            <Text style={[styles.routeTag, { color: '#F87171' }]}>ALT 2 (CHECKPOST)</Text>
+                            <Text style={[styles.routeMainText, { color: '#FCA5A5' }]}>🔴 {routeStats.alt2Km} km</Text>
+                            <Text style={styles.routeSubText}>+6 min • Congested</Text>
+                          </View>
+                        </View>
+                      )}
+                    </ScrollView>
+                  )}
                 </View>
               )}
             </>
           )}
 
-      {/* Universal 3-Platform Interactive Map View */}
-      {Platform.OS === 'web' ? (
-        <View style={styles.map}>
-          {/* @ts-ignore */}
-          <iframe
-            srcDoc={leafletMapHtml}
-            style={{ width: '100%', height: '100%', border: 'none' }}
-            title="SmartWay Live Map"
-          />
-        </View>
-      ) : Platform.OS === 'android' && WebView ? (
-        <WebView
-          source={{ html: leafletMapHtml }}
-          style={styles.map}
-          originWhitelist={['*']}
-          javaScriptEnabled={true}
-          domStorageEnabled={true}
-          allowFileAccess={true}
-          mixedContentMode="always"
-        />
-      ) : (
-        <MapView
-          ref={mapRef}
-          provider={PROVIDER_DEFAULT}
-          style={styles.map}
-          initialRegion={{
-            latitude: 17.446,
-            longitude: 78.402,
-            latitudeDelta: 0.035,
-            longitudeDelta: 0.035,
-          }}
-        >
-          {/* Pickup Markers */}
-          {!isDispatched &&
-            incidents.map((inc) => (
-              <Marker
-                key={`inc_${inc.id}`}
-                coordinate={{ latitude: inc.lat, longitude: inc.lon }}
-                title={`📍 ${inc.name}`}
-                description="Tap Dispatch to select this pickup"
-                pinColor="orange"
-              />
-            ))}
-
-          {isDispatched && selectedIncident && (
-            <Marker
-              coordinate={{
-                latitude: selectedIncident.lat,
-                longitude: selectedIncident.lon,
-              }}
-              title={`📍 Pickup: ${selectedIncident.name}`}
-              pinColor="orange"
-            />
-          )}
-
-          {/* Destination Hospital Marker */}
-          {isDispatched && selectedHospital ? (
-            <Marker
-              coordinate={{
-                latitude: selectedHospital.lat,
-                longitude: selectedHospital.lon,
-              }}
-              title={`🏥 Destination: ${selectedHospital.name}`}
-              pinColor="green"
-            />
-          ) : (
-            hospitals.map((hosp) => (
-              <Marker
-                key={`hosp_${hosp.id}`}
-                coordinate={{ latitude: hosp.lat, longitude: hosp.lon }}
-                title={`🏥 ${hosp.name}`}
-                pinColor="green"
-              />
-            ))
-          )}
-
-          {/* Traffic Signals: RED initially, GREEN within 200m */}
-          {tlsList.map((tls) => {
-            const isGreen = tls.state === "GREEN";
-            return (
-              <Marker
-                key={`tls_${tls.id}`}
-                coordinate={{ latitude: tls.lat, longitude: tls.lon }}
-                title={`🚦 ${tls.name}`}
-                description={isGreen ? "🟢 GREEN — Cleared for Ambulance" : "🔴 RED — Normal Traffic Stop"}
-                pinColor={isGreen ? "#10B981" : "#EF4444"}
-              />
-            );
-          })}
-
-          {/* Google Maps Route 2 (Alternative 1 - Slate Gray) */}
-          {altRoute1.length > 0 && (
-            <Polyline
-              coordinates={altRoute1}
-              strokeColor="#94A3B8"
-              strokeWidth={4}
-              lineDashPattern={[6, 4]}
-              zIndex={2}
-            />
-          )}
-
-          {/* Google Maps Route 3 (Alternative 2 - Muted Coral/Red) */}
-          {altRoute2.length > 0 && (
-            <Polyline
-              coordinates={altRoute2}
-              strokeColor="#F87171"
-              strokeWidth={4}
-              lineDashPattern={[6, 4]}
-              zIndex={3}
-            />
-          )}
-
-          {/* Google Maps Route 1 (Optimal - Bold Bright Blue) */}
-          {optimalRoute.length > 0 && (
-            <Polyline
-              coordinates={optimalRoute}
-              strokeColor="#007AFF"
-              strokeWidth={7}
-              lineCap="round"
-              lineJoin="round"
-              zIndex={10}
-            />
-          )}
-
-          {/* Live Ambulance Marker */}
-          {ambulance && (
-            <Marker
-              coordinate={{
-                latitude: ambulance.latitude,
-                longitude: ambulance.longitude,
-              }}
-              title="🚑 Emergency Ambulance"
-              description={`Speed: ${ambulanceSpeed} km/h`}
-              pinColor="blue"
-              zIndex={20}
-            />
-          )}
-        </MapView>
-      )}
+      {/* Universal 3-Platform SmartMap (Web: Leaflet iframe, Android: Leaflet WebView, iOS: Apple Maps) */}
+      <SmartMap
+        leafletHtml={leafletMapHtml}
+        ambulance={ambulance}
+        incidents={incidents}
+        selectedIncident={selectedIncident}
+        hospitals={hospitals}
+        selectedHospital={selectedHospital}
+        signals={tlsList}
+        optimalRoute={optimalRoute}
+        altRoute1={altRoute1}
+        altRoute2={altRoute2}
+        isDispatched={isDispatched}
+        mapRef={mapRef}
+        style={styles.map}
+        ambulanceSpeed={ambulanceSpeed}
+      />
 
       {/* Floating Center Button */}
       {ambulance && (
@@ -3430,12 +3382,67 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 
-  // Inspector card
-  adminInspectorCard: {
+  // Compact Admin Fleet Bar
+  adminCompactFleetBar: {
+    backgroundColor: '#0F172A',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
+  },
+  compactFleetScroll: {
+    paddingHorizontal: 12,
+    gap: 8,
+    alignItems: 'center',
+  },
+  compactFleetChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E293B',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
+    gap: 6,
+  },
+  compactFleetChipSelected: {
+    borderColor: '#38BDF8',
+    backgroundColor: '#1E3A8A',
+  },
+  compactFleetChipLive: {
+    borderColor: '#10B981',
+  },
+  compactFleetChipIcon: {
+    fontSize: 12,
+  },
+  compactFleetChipName: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  compactFleetChipNameSelected: {
+    color: '#F8FAFC',
+  },
+  compactDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  dotLive: {
+    backgroundColor: '#10B981',
+  },
+  dotStandby: {
+    backgroundColor: '#64748B',
+  },
+
+  // Streamlined Admin Inspector Sheet
+  adminInspectorSheet: {
     backgroundColor: '#1E293B',
     borderRadius: 14,
-    padding: 12,
-    marginTop: 8,
+    padding: 10,
+    marginHorizontal: 10,
+    marginTop: 6,
+    marginBottom: 6,
     borderWidth: 1,
     borderColor: '#334155',
   },
@@ -3443,22 +3450,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
   },
   inspectorUnitTitle: {
     color: '#F8FAFC',
-    fontSize: 14,
-    fontWeight: '900',
+    fontSize: 13,
+    fontWeight: '800',
   },
   inspectorDriverName: {
     color: '#94A3B8',
-    fontSize: 11,
+    fontSize: 10,
     marginTop: 1,
   },
   inspectorStatusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   pillLive: {
     backgroundColor: 'rgba(239, 68, 68, 0.2)',
@@ -3474,94 +3480,207 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
   },
-
-  inspectorRoutePath: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0F172A',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#334155',
+  miniActionBtn: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
-  pathPoint: {
-    flex: 1,
+  miniActionBtnText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
   },
-  pathPointLabel: {
-    color: '#64748B',
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 0.5,
+  miniActionBtnSecondary: {
+    backgroundColor: '#334155',
   },
-  pathPointName: {
+  miniActionBtnSecondaryText: {
+    color: '#E2E8F0',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  toggleDetailsBtn: {
+    backgroundColor: '#334155',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  toggleDetailsBtnText: {
+    color: '#38BDF8',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  inspectorQuickStrip: {
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+  },
+  quickStripText: {
     color: '#F1F5F9',
     fontSize: 11,
-    fontWeight: '700',
-    marginTop: 2,
+    fontWeight: '600',
+    marginBottom: 4,
   },
-  pathArrow: {
-    color: '#38BDF8',
-    fontSize: 14,
-    paddingHorizontal: 8,
-    fontWeight: '900',
-  },
-
-  inspectorMetricsStrip: {
+  quickMetricsRow: {
     flexDirection: 'row',
+    gap: 6,
+  },
+  quickMetricBadge: {
+    color: '#F59E0B',
+    fontSize: 10,
+    fontWeight: '700',
     backgroundColor: '#0F172A',
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    justifyContent: 'space-around',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+  },
+  inspectorTabsContainer: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+  },
+  tabNavRow: {
+    flexDirection: 'row',
+    gap: 6,
     marginBottom: 8,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#0F172A',
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: '#334155',
   },
-  inspectorMetric: {
-    alignItems: 'center',
+  tabButtonActive: {
+    backgroundColor: '#1E3A8A',
+    borderColor: '#38BDF8',
   },
-  inspectorMetricValue: {
-    color: '#F8FAFC',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  inspectorMetricLabel: {
+  tabButtonText: {
     color: '#94A3B8',
-    fontSize: 8,
-    fontWeight: '800',
-    marginTop: 1,
+    fontSize: 10,
+    fontWeight: '700',
   },
-  inspectorMetricDivider: {
-    width: 1,
-    height: 20,
-    backgroundColor: '#334155',
+  tabButtonTextActive: {
+    color: '#F8FAFC',
+  },
+  tabContentCard: {
+    backgroundColor: '#0F172A',
+    borderRadius: 8,
+    padding: 8,
+    gap: 4,
+  },
+  tabSectionTitle: {
+    color: '#64748B',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  tabDetailText: {
+    color: '#94A3B8',
+    fontSize: 11,
   },
 
-  inspectorActionButtons: {
+  // Streamlined Driver HUD
+  driverHUDOverlay: {
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
+    gap: 6,
+  },
+  driverGlanceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E293B',
+    borderRadius: 10,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  driverGlanceDestination: {
+    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  driverGlanceSubRow: {
     flexDirection: 'row',
     gap: 8,
+    marginTop: 3,
   },
-  actionBtn: {
-    flex: 1,
-    backgroundColor: '#2563EB',
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
+  driverGlanceSpeed: {
+    color: '#EF4444',
+    fontSize: 10,
+    fontWeight: '800',
   },
-  actionBtnText: {
-    color: '#FFFFFF',
-    fontSize: 11,
+  driverGlanceSaved: {
+    color: '#38BDF8',
+    fontSize: 10,
     fontWeight: '700',
   },
-  actionBtnSecondary: {
+  driverGlanceSignals: {
+    color: '#10B981',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  driverDetailsToggleBtn: {
     backgroundColor: '#334155',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
   },
-  actionBtnSecondaryText: {
-    color: '#E2E8F0',
-    fontSize: 11,
+  driverDetailsToggleText: {
+    color: '#38BDF8',
+    fontSize: 10,
     fontWeight: '700',
+  },
+  driverNextSignalPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  signalPillGreen: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+  },
+  signalPillRed: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+  },
+  driverNextSignalText: {
+    color: '#F8FAFC',
+    fontSize: 11,
+  },
+  floatingAlertBanner: {
+    backgroundColor: '#065F46',
+    borderRadius: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  floatingAlertText: {
+    color: '#A7F3D0',
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  congestionFloatingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#7F1D1D',
+    borderRadius: 8,
+    padding: 8,
+  },
+  driverExpandedDrawer: {
+    maxHeight: 220,
+    marginTop: 4,
   },
 
   standbyInfoBox: {
