@@ -14,6 +14,7 @@
         "NSLocationWhenInUseUsageDescription": "SmartWay requires your live GPS location to navigate emergency corridors and preempt traffic signals in Hyderabad.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "SmartWay requires background location to maintain real-time green wave preemption while driving in Hyderabad.",
         "UIBackgroundModes": [
+          "location",
           "location"
         ]
       }
@@ -25,7 +26,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anikethbadakala.SmartWayApp"
     },
     "web": {
       "output": "static",
@@ -45,6 +47,18 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "eee8ac5c-ef47-4f7d-a233-7ca71caea472"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/eee8ac5c-ef47-4f7d-a233-7ca71caea472"
     }
   }
 }

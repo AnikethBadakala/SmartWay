@@ -19,6 +19,14 @@ import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 
+// Safe conditional WebView import for Android standalone builds (zero crashes on Web)
+let WebView: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    WebView = require('react-native-webview').WebView;
+  } catch (e) {}
+}
+
 const RENDER_CLOUD_HOST = 'smartway-backend-ir79.onrender.com';
 
 // Detect local host IP from Expo Go connection if needed
@@ -71,13 +79,190 @@ async function fetchOSRMRoute(origin: { lat: number; lon: number }, dest: { lat:
   return null;
 }
 
-// Helper: Voice audio announcement for driver hands-free safety
+// Helper: Voice audio announcement for driver hands-free safety (Native & Web Speech)
 const speakAlert = (text: string) => {
   try {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'en-IN';
+      utter.rate = 1.0;
+      window.speechSynthesis.speak(utter);
+      return;
+    }
     Speech.stop();
     Speech.speak(text, { language: 'en-IN', rate: 1.0 });
   } catch (e) {}
 };
+
+// Universal Leaflet / OpenStreetMap HTML generator (100% Free, Zero API Keys, Universal Web & Android)
+function getLeafletMapHtml(props: {
+  ambulance: any;
+  incidents: any[];
+  selectedIncident: any;
+  hospitals: any[];
+  selectedHospital: any;
+  signals: any[];
+  optimalRoute: any[];
+  altRoute1: any[];
+  altRoute2: any[];
+  isDispatched: boolean;
+}) {
+  const centerLat = props.ambulance?.latitude || props.selectedIncident?.lat || 17.446;
+  const centerLon = props.ambulance?.longitude || props.selectedIncident?.lon || 78.390;
+
+  const signalsData = (props.signals || []).map(s => ({
+    id: s.id,
+    name: s.name,
+    lat: s.lat,
+    lon: s.lon,
+    state: s.state || 'RED',
+  }));
+
+  const hospitalsData = (props.isDispatched && props.selectedHospital ? [props.selectedHospital] : props.hospitals || []).map(h => ({
+    id: h.id,
+    name: h.name,
+    address: h.address || '',
+    lat: h.lat,
+    lon: h.lon,
+    icu_beds_available: h.icu_beds_available || 10,
+  }));
+
+  const incidentsData = (props.isDispatched && props.selectedIncident ? [props.selectedIncident] : props.incidents || []).map(i => ({
+    id: i.id,
+    name: i.name,
+    address: i.address || '',
+    lat: i.lat,
+    lon: i.lon,
+  }));
+
+  const optimalRouteCoords = (props.optimalRoute || []).map(p => [p.latitude, p.longitude]);
+  const alt1Coords = (props.altRoute1 || []).map(p => [p.latitude, p.longitude]);
+  const alt2Coords = (props.altRoute2 || []).map(p => [p.latitude, p.longitude]);
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0F172A; }
+    .sig-marker {
+      width: 18px; height: 18px; border-radius: 9px;
+      border: 2px solid #FFFFFF; box-shadow: 0 0 6px rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px;
+    }
+    .sig-red { background: #DC2626; box-shadow: 0 0 8px #EF4444; }
+    .sig-green { background: #10B981; box-shadow: 0 0 12px #34D399; animation: pulseGreen 1.2s infinite; }
+    .amb-pulse {
+      width: 28px; height: 28px; border-radius: 14px;
+      background: #2563EB; border: 3px solid #60A5FA;
+      box-shadow: 0 0 14px #3B82F6; display: flex; align-items: center; justify-content: center; font-size: 14px;
+    }
+    @keyframes pulseGreen {
+      0% { transform: scale(1); box-shadow: 0 0 6px #10B981; }
+      50% { transform: scale(1.3); box-shadow: 0 0 16px #34D399; }
+      100% { transform: scale(1); box-shadow: 0 0 6px #10B981; }
+    }
+    .leaflet-popup-content-wrapper {
+      background: #1E293B; color: #F8FAFC; border: 1px solid #334155; border-radius: 8px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .leaflet-popup-tip { background: #1E293B; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map', { zoomControl: false }).setView([${centerLat}, ${centerLon}], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    var signals = ${JSON.stringify(signalsData)};
+    var hospitals = ${JSON.stringify(hospitalsData)};
+    var incidents = ${JSON.stringify(incidentsData)};
+    var optimalRoute = ${JSON.stringify(optimalRouteCoords)};
+    var alt1Route = ${JSON.stringify(alt1Coords)};
+    var alt2Route = ${JSON.stringify(alt2Coords)};
+    var ambulance = ${JSON.stringify(props.ambulance || null)};
+
+    // Alternative Routes
+    if (alt1Route && alt1Route.length > 0) {
+      L.polyline(alt1Route, { color: '#94A3B8', weight: 4, dashArray: '6, 6' }).addTo(map);
+    }
+    if (alt2Route && alt2Route.length > 0) {
+      L.polyline(alt2Route, { color: '#F87171', weight: 4, dashArray: '6, 6' }).addTo(map);
+    }
+
+    // Optimal Green Wave Route (Bold Bright Blue)
+    if (optimalRoute && optimalRoute.length > 0) {
+      var routeLine = L.polyline(optimalRoute, { color: '#007AFF', weight: 6, opacity: 0.9 }).addTo(map);
+      map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+    }
+
+    // 59 Traffic Signals
+    signals.forEach(function(sig) {
+      var isGreen = sig.state === 'GREEN';
+      var icon = L.divIcon({
+        className: 'custom-div-icon',
+        html: '<div class="sig-marker ' + (isGreen ? 'sig-green' : 'sig-red') + '">' + (isGreen ? '🟢' : '🔴') + '</div>',
+        iconSize: [18, 18],
+        iconAnchor: [9, 9]
+      });
+      L.marker([sig.lat, sig.lon], { icon: icon })
+        .addTo(map)
+        .bindPopup('<b>🚦 ' + sig.name + '</b><br>' + (isGreen ? '<span style="color:#34D399;font-weight:bold;">🟢 GREEN WAVE ENGAGED</span>' : '<span style="color:#F87171">🔴 RED</span>'));
+    });
+
+    // Hospitals
+    hospitals.forEach(function(hosp) {
+      var icon = L.divIcon({
+        className: 'custom-div-icon',
+        html: '<div style="font-size:24px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.6));">🏥</div>',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+      L.marker([hosp.lat, hosp.lon], { icon: icon })
+        .addTo(map)
+        .bindPopup('<b>🏥 ' + hosp.name + '</b><br>' + (hosp.address || '') + '<br><b>ICU Beds:</b> ' + (hosp.icu_beds_available || 10));
+    });
+
+    // Pickups / Incidents
+    incidents.forEach(function(inc) {
+      var icon = L.divIcon({
+        className: 'custom-div-icon',
+        html: '<div style="font-size:24px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.6));">📍</div>',
+        iconSize: [24, 24],
+        iconAnchor: [12, 24]
+      });
+      L.marker([inc.lat, inc.lon], { icon: icon })
+        .addTo(map)
+        .bindPopup('<b>📍 ' + inc.name + '</b><br>' + (inc.address || ''));
+    });
+
+    // Ambulance Marker
+    if (ambulance && ambulance.latitude && ambulance.longitude) {
+      var ambIcon = L.divIcon({
+        className: 'custom-div-icon',
+        html: '<div class="amb-pulse">🚑</div>',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+      });
+      L.marker([ambulance.latitude, ambulance.longitude], { icon: ambIcon, zIndexOffset: 1000 })
+        .addTo(map)
+        .bindPopup('<b>🚑 Emergency Ambulance</b><br>Speed: ' + (ambulance.speed || 0) + ' km/h');
+    }
+  </script>
+</body>
+</html>
+  `;
+}
 
 const DEFAULT_INCIDENTS = [
   {
@@ -385,6 +570,21 @@ export default function HomeScreen() {
 
   const activeSelectedFleet = fleetList.find(f => f.id === selectedFleetId) || fleetList[0];
 
+  const leafletMapHtml = useMemo(() => {
+    return getLeafletMapHtml({
+      ambulance,
+      incidents,
+      selectedIncident,
+      hospitals,
+      selectedHospital,
+      signals: tlsList,
+      optimalRoute,
+      altRoute1,
+      altRoute2,
+      isDispatched,
+    });
+  }, [ambulance, incidents, selectedIncident, hospitals, selectedHospital, tlsList, optimalRoute, altRoute1, altRoute2, isDispatched]);
+
   const fitToFullRoute = () => {
     if (!mapRef.current) return;
     const points: any[] = [];
@@ -604,17 +804,38 @@ export default function HomeScreen() {
         }
         setHasLocationPermission(true);
 
-        const initialPos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        setDeviceLocation(initialPos);
+        let initialPos: any = null;
+        try {
+          initialPos = await Location.getLastKnownPositionAsync().catch(() => null);
+          if (!initialPos) {
+            initialPos = await Promise.race([
+              Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+            ]);
+          }
+        } catch (e) {
+          initialPos = {
+            coords: {
+              latitude: 17.446,
+              longitude: 78.390,
+              accuracy: 15,
+              altitude: 0,
+              heading: 0,
+              speed: 0
+            },
+            timestamp: Date.now()
+          };
+        }
 
-        if (appMode === 'real_driver' && !isDispatched) {
-          setAmbulance({
-            latitude: initialPos.coords.latitude,
-            longitude: initialPos.coords.longitude,
-            speed: Math.round((initialPos.coords.speed || 0) * 3.6),
-          });
+        if (initialPos) {
+          setDeviceLocation(initialPos);
+          if (appMode === 'real_driver' && !isDispatched) {
+            setAmbulance({
+              latitude: initialPos.coords.latitude,
+              longitude: initialPos.coords.longitude,
+              speed: Math.round((initialPos.coords.speed || 0) * 3.6),
+            });
+          }
         }
 
         locationSubscription = await Location.watchPositionAsync(
@@ -728,14 +949,20 @@ export default function HomeScreen() {
     setLoginLoading(true);
     setLoginError(null);
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000);
+
       const res = await fetch(`${API_URL}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           username: loginId.trim(),
           password: loginPassword.trim()
         })
       });
+      clearTimeout(timeoutId);
+
       const data = await res.json();
       if (data.authenticated) {
         setCurrentUser(data);
@@ -745,8 +972,12 @@ export default function HomeScreen() {
       } else {
         setLoginError(data.error || "Invalid ID or password. Please try again.");
       }
-    } catch (e) {
-      setLoginError("Connection failed. Check backend server connection.");
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        setLoginError("Cloud server waking up. Please tap again in 5 seconds.");
+      } else {
+        setLoginError("Connection failed. Check internet connection or tap again.");
+      }
     } finally {
       setLoginLoading(false);
     }
@@ -1135,7 +1366,15 @@ export default function HomeScreen() {
               onPress={handleLogin}
             >
               {loginLoading ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <View style={{ alignItems: 'center', paddingVertical: 4 }}>
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13, marginTop: 4 }}>
+                    Connecting to Cloud Server...
+                  </Text>
+                  <Text style={{ color: '#CBD5E1', fontSize: 10, marginTop: 2 }}>
+                    (Waking up Render instance, please wait ~20s)
+                  </Text>
+                </View>
               ) : (
                 <Text style={styles.loginSubmitButtonText}>
                   {loginRole === 'driver' ? "Enter Emergency Navigation ➔" : "Open Admin Command Center ➔"}
@@ -1621,13 +1860,26 @@ export default function HomeScreen() {
             </>
           )}
 
-      {/* Interactive Map View */}
+      {/* Universal 3-Platform Interactive Map View */}
       {Platform.OS === 'web' ? (
-        <View style={styles.webFallback}>
-          <Text style={styles.webFallbackText}>
-            Native Map active on iOS / Android Expo Go.
-          </Text>
+        <View style={styles.map}>
+          {/* @ts-ignore */}
+          <iframe
+            srcDoc={leafletMapHtml}
+            style={{ width: '100%', height: '100%', border: 'none' }}
+            title="SmartWay Live Map"
+          />
         </View>
+      ) : Platform.OS === 'android' && WebView ? (
+        <WebView
+          source={{ html: leafletMapHtml }}
+          style={styles.map}
+          originWhitelist={['*']}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          allowFileAccess={true}
+          mixedContentMode="always"
+        />
       ) : (
         <MapView
           ref={mapRef}
